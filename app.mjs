@@ -14,12 +14,20 @@ import {
   TiUartBsl,
   validateApplicationImage,
 } from "./firmware_update.mjs";
-import {
-  calculateEncoderCalibration,
-  signedCounterDelta,
-  unsignedCounterDelta,
-} from "./encoder_calibration.mjs";
 import { sendMotorTarget } from "./motor_command.mjs";
+import {
+  AUTOTUNE_DUTIES_PERMILLE,
+  AUTOTUNE_KEEPALIVE_PERIOD_MS,
+  AUTOTUNE_SAMPLE_PERIOD_MS,
+  MotorAutotuneError,
+  analyzeAutotuneClosedLoop,
+  assertSafeAutotuneStatus,
+  chooseAutotuneTargetRpm,
+  designAutotunePi,
+  makeAutotuneCandidate,
+  makeAutotuneSample,
+  summarizeAutotuneStep,
+} from "./motor_autotune.mjs";
 
 const PRODUCT_NAME = "MSPM0G3507 四路电机控制器";
 const POLL_INTERVAL_MS = 50;
@@ -42,11 +50,13 @@ const elements = Object.fromEntries([
   "param-alpha", "param-cpr", "param-gear", "param-max-speed",
   "param-max-duty", "param-accel", "param-invert-motor",
   "param-invert-encoder", "param-timeout", "param-window", "param-version",
-  "param-sequence", "param-crc", "calibration-state", "calibration-motor",
-  "calibration-turns", "calibration-start-button", "calibration-finish-button",
-  "calibration-cancel-button", "calibration-start-count", "calibration-current-count",
-  "calibration-delta", "calibration-effective-cpr", "calibration-direction",
-  "calibration-error-delta", "update-file-input", "select-update-file-button",
+  "param-sequence", "param-crc", "autotune-state", "autotune-motor",
+  "autotune-confirm-lifted", "autotune-confirm-scale", "autotune-direction-choice",
+  "autotune-start-button", "autotune-stop-button", "autotune-export-button",
+  "autotune-progress", "autotune-progress-label", "autotune-gain",
+  "autotune-deadzone", "autotune-tau", "autotune-delay", "autotune-pi",
+  "autotune-target", "autotune-mae", "autotune-overshoot", "autotune-feedback",
+  "update-file-input", "select-update-file-button",
   "update-file-name", "update-file-size", "update-current-version",
   "update-image-version", "update-board-id", "update-image-length",
   "update-image-crc", "update-confirm", "update-start-button",
@@ -68,8 +78,9 @@ let previousSampleTime = 0;
 let toastTimer = 0;
 let selectedUpdate = null;
 let updateInProgress = false;
-let encoderCalibration = null;
-let calibrationBusy = false;
+let autotuneBusy = false;
+let autotuneAbortRequested = false;
+let autotuneReport = null;
 
 function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -115,97 +126,75 @@ function setConnectionState(state, label) {
   elements.connection_label.textContent = label;
 }
 
-function calibrationRecording() {
-  return encoderCalibration?.phase === "recording";
+function selectedAutotuneDirection() {
+  return document.querySelector('input[name="autotune-direction"]:checked')?.value || null;
 }
 
-function setCalibrationState(label, state) {
-  elements.calibration_state.textContent = label;
-  elements.calibration_state.dataset.state = state;
+function setAutotuneState(label, state) {
+  elements.autotune_state.textContent = label;
+  elements.autotune_state.dataset.state = state;
 }
 
-function setEncoderCalibrationControls(enabled = Boolean(session)) {
-  const recording = calibrationRecording();
-  const available = enabled && currentParams && currentStatus;
-  let canFinish = false;
-  if (recording && currentStatus) {
-    const motor = currentStatus.motors[encoderCalibration.motor];
-    const delta = signedCounterDelta(encoderCalibration.startCount, motor.encoderCount);
-    const errors = unsignedCounterDelta(encoderCalibration.startErrors, motor.encoderErrors);
-    canFinish = delta !== 0 && errors === 0;
-  }
+function setAutotuneProgress(percent) {
+  const value = Math.max(0, Math.min(100, Math.round(percent)));
+  elements.autotune_progress.value = value;
+  elements.autotune_progress_label.textContent = `${value}%`;
+}
 
-  elements.calibration_turns.disabled = !available || recording || calibrationBusy;
-  elements.calibration_start_button.disabled = !available || recording || calibrationBusy;
-  elements.calibration_finish_button.disabled = !canFinish || calibrationBusy;
-  elements.calibration_cancel_button.disabled = !recording || calibrationBusy;
-  elements.calibration_start_button.textContent = encoderCalibration?.phase === "saved"
-    ? "重新标定"
-    : "开始记录";
-  document.querySelectorAll(".motor-select-button").forEach((button) => {
-    button.disabled = recording || calibrationBusy;
+function setAutotuneStage(name, state, label = null) {
+  const stage = document.querySelector(`[data-autotune-stage="${name}"]`);
+  if (!stage) return;
+  stage.dataset.state = state;
+  if (label) stage.querySelector("em").textContent = label;
+}
+
+function resetAutotuneDisplay(label = "等待开始") {
+  autotuneReport = null;
+  autotuneAbortRequested = false;
+  elements.autotune_motor.textContent = `电机 ${MOTOR_NAMES[selectedMotor]}`;
+  setAutotuneState(label, "idle");
+  setAutotuneProgress(0);
+  document.querySelectorAll("[data-autotune-stage]").forEach((stage) => {
+    stage.dataset.state = "pending";
+    stage.querySelector("em").textContent = "等待";
   });
+  [
+    elements.autotune_gain, elements.autotune_deadzone, elements.autotune_tau,
+    elements.autotune_delay, elements.autotune_pi, elements.autotune_target,
+    elements.autotune_mae, elements.autotune_overshoot, elements.autotune_feedback,
+  ].forEach((element) => { element.textContent = "--"; });
+  setAutotuneControls();
 }
 
-function resetEncoderCalibration(label = "等待开始") {
-  encoderCalibration = null;
-  calibrationBusy = false;
-  elements.calibration_motor.textContent = `电机 ${MOTOR_NAMES[selectedMotor]}`;
-  elements.calibration_start_count.textContent = "--";
-  elements.calibration_current_count.textContent = "--";
-  elements.calibration_delta.textContent = "--";
-  elements.calibration_effective_cpr.textContent = "--";
-  elements.calibration_direction.textContent = "--";
-  elements.calibration_error_delta.textContent = "--";
-  setCalibrationState(label, "idle");
-  setEncoderCalibrationControls();
+function setAutotuneControls(enabled = Boolean(session)) {
+  const available = enabled && currentParams && currentStatus;
+  const confirmed = elements.autotune_confirm_lifted.checked &&
+    elements.autotune_confirm_scale.checked && selectedAutotuneDirection();
+  elements.autotune_confirm_lifted.disabled = !available || autotuneBusy;
+  elements.autotune_confirm_scale.disabled = !available || autotuneBusy;
+  elements.autotune_direction_choice.disabled = !available || autotuneBusy;
+  elements.autotune_start_button.disabled = !available || autotuneBusy || !confirmed;
+  elements.autotune_stop_button.disabled = !autotuneBusy;
+  elements.autotune_export_button.disabled = !autotuneReport || autotuneBusy;
 }
 
-function updateEncoderCalibrationDisplay() {
-  if (!encoderCalibration) {
-    elements.calibration_motor.textContent = `电机 ${MOTOR_NAMES[selectedMotor]}`;
-    setEncoderCalibrationControls();
-    return;
-  }
+function renderAutotuneIdentification(design, feedbackInverted) {
+  elements.autotune_gain.textContent = `${design.plantGainRpmPerPermille.toFixed(4)} rpm/‰`;
+  elements.autotune_deadzone.textContent = `${(design.estimatedDeadzonePermille / 10).toFixed(1)} %`;
+  elements.autotune_tau.textContent = `${design.tauS.toFixed(3)} s`;
+  elements.autotune_delay.textContent = `${design.deadtimeS.toFixed(3)} s`;
+  elements.autotune_pi.textContent = `${design.kp.toFixed(6)} / ${design.ki.toFixed(6)}`;
+  elements.autotune_feedback.textContent = feedbackInverted ? "已自动反相" : "符号一致";
+}
 
-  const calibration = encoderCalibration;
-  const statusMotor = currentStatus?.motors[calibration.motor];
-  if (statusMotor) {
-    calibration.currentCount = statusMotor.encoderCount;
-    calibration.currentErrors = statusMotor.encoderErrors;
-  }
-  const countDelta = signedCounterDelta(calibration.startCount, calibration.currentCount);
-  const errorDelta = unsignedCounterDelta(calibration.startErrors, calibration.currentErrors);
-  const preview = Math.abs(countDelta) / calibration.turns;
-
-  elements.calibration_motor.textContent = `电机 ${MOTOR_NAMES[calibration.motor]}`;
-  elements.calibration_start_count.textContent = calibration.startCount.toLocaleString();
-  elements.calibration_current_count.textContent = calibration.currentCount.toLocaleString();
-  elements.calibration_delta.textContent = countDelta.toLocaleString();
-  elements.calibration_effective_cpr.textContent = countDelta === 0 ? "--" : preview.toFixed(1);
-  elements.calibration_direction.textContent = countDelta > 0
-    ? "正计数"
-    : countDelta < 0 ? "负计数 · 保存时反相" : "--";
-  elements.calibration_error_delta.textContent = errorDelta.toLocaleString();
-
-  if (calibration.phase === "saved") {
-    elements.calibration_effective_cpr.textContent =
-      calibration.result.effectiveCountsPerRev.toLocaleString();
-    setCalibrationState("已保存到 Flash", "saved");
-  } else if (calibrationBusy) {
-    setCalibrationState("正在处理", "busy");
-  } else if (errorDelta !== 0) {
-    setCalibrationState("跳变错误 · 取消重试", "error");
-  } else if (calibration.failure) {
-    setCalibrationState("标定失败 · 可重试", "error");
-  } else {
-    setCalibrationState(`正向转动 ${calibration.turns} 圈后完成`, "recording");
-  }
-  setEncoderCalibrationControls();
+function renderAutotuneClosedLoop(result) {
+  elements.autotune_target.textContent = `${result.targetRpm.toFixed(2)} rpm`;
+  elements.autotune_mae.textContent = `${result.meanAbsErrorRpm.toFixed(3)} rpm`;
+  elements.autotune_overshoot.textContent = `${result.overshootPercent.toFixed(2)} %`;
 }
 
 function setInteractive(enabled) {
-  const recording = calibrationRecording() || calibrationBusy;
+  const recording = autotuneBusy;
   elements.estop_button.disabled = !enabled;
   [
     elements.enable_switch, elements.target_input, elements.target_slider,
@@ -225,7 +214,10 @@ function setInteractive(enabled) {
   elements.apply_params_button.disabled = !enabled || !currentParams || recording;
   elements.save_params_button.disabled = !enabled || !currentParams || recording;
   if (!enabled || recording) elements.clear_estop_button.disabled = true;
-  setEncoderCalibrationControls(enabled);
+  document.querySelectorAll(".motor-select-button").forEach((button) => {
+    button.disabled = autotuneBusy;
+  });
+  setAutotuneControls(enabled);
   setUpdateControls();
 }
 
@@ -258,12 +250,11 @@ function setUpdateControls() {
   const confirmed = elements.update_confirm.checked;
   const hasImage = selectedUpdate !== null;
   const isNewer = hasImage && session && selectedUpdate.header.imageVersion > session.version;
-  const calibrationActive = calibrationRecording() || calibrationBusy;
-  elements.select_update_file_button.disabled = updateInProgress || calibrationActive;
-  elements.update_file_input.disabled = updateInProgress || calibrationActive;
-  elements.update_confirm.disabled = updateInProgress || calibrationActive || !hasImage;
-  elements.update_start_button.disabled = updateInProgress || calibrationActive || !confirmed || !isNewer;
-  elements.update_recovery_button.disabled = updateInProgress || calibrationActive ||
+  elements.select_update_file_button.disabled = updateInProgress || autotuneBusy;
+  elements.update_file_input.disabled = updateInProgress || autotuneBusy;
+  elements.update_confirm.disabled = updateInProgress || autotuneBusy || !hasImage;
+  elements.update_start_button.disabled = updateInProgress || autotuneBusy || !confirmed || !isNewer;
+  elements.update_recovery_button.disabled = updateInProgress || autotuneBusy ||
     !confirmed || !hasImage || Boolean(session);
   elements.update_current_version.textContent = session ? firmwareLabel(session.version) : "未连接";
 
@@ -686,17 +677,15 @@ function clearParameterForm() {
 }
 
 function selectMotor(index) {
-  if ((calibrationRecording() || calibrationBusy) &&
-      index !== encoderCalibration?.motor) {
-    toast("编码器标定期间不能切换通道", "error");
+  if (autotuneBusy && index !== autotuneReport?.motor) {
+    toast("自动整定期间不能切换通道", "error");
     return;
   }
-  const clearCompletedCalibration = encoderCalibration?.phase === "saved" &&
-    index !== encoderCalibration.motor;
+  const clearAutotuneResult = autotuneReport && index !== autotuneReport.motor;
   if (currentParams) captureParameterForm();
   selectedMotor = index;
-  if (clearCompletedCalibration) resetEncoderCalibration();
-  else elements.calibration_motor.textContent = `电机 ${MOTOR_NAMES[index]}`;
+  if (clearAutotuneResult) resetAutotuneDisplay();
+  else elements.autotune_motor.textContent = `电机 ${MOTOR_NAMES[index]}`;
   document.querySelectorAll("[data-motor]").forEach((element) => {
     element.classList.toggle("is-active", Number(element.dataset.motor) === index);
   });
@@ -711,6 +700,7 @@ function selectMotor(index) {
   }
   if (currentParams) populateParameterForm();
   updateStatusDisplay();
+  setAutotuneControls();
   renderCharts();
 }
 
@@ -752,7 +742,7 @@ function updateStatusDisplay() {
   if (!currentStatus) return;
   elements.uptime_value.textContent = durationLabel(currentStatus.uptimeMs);
   elements.fault_value.textContent = hex(currentStatus.faults);
-  elements.clear_estop_button.disabled = !session || !currentStatus.estopLatched;
+  elements.clear_estop_button.disabled = !session || !currentStatus.estopLatched || autotuneBusy;
   elements.estop_button.textContent = currentStatus.estopLatched ? "急停已锁存" : "全部急停";
 
   currentStatus.motors.forEach((motor, index) => {
@@ -787,7 +777,6 @@ function updateStatusDisplay() {
   elements.control_output.textContent = `${(motor.outputPermille / 10).toFixed(1)} %`;
   elements.control_mode_readback.textContent = MODE_NAMES[motor.mode] || String(motor.mode);
   elements.control_errors.textContent = motor.encoderErrors.toLocaleString();
-  updateEncoderCalibrationDisplay();
 }
 
 function recordStatus(status) {
@@ -964,7 +953,12 @@ async function activateSession(newSession) {
   paused = false;
   sampleHz = 0;
   previousSampleTime = 0;
-  resetEncoderCalibration();
+  elements.autotune_confirm_lifted.checked = false;
+  elements.autotune_confirm_scale.checked = false;
+  document.querySelectorAll('input[name="autotune-direction"]').forEach((input) => {
+    input.checked = false;
+  });
+  resetAutotuneDisplay();
   elements.pause_button.textContent = "暂停";
   elements.device_name.textContent = PRODUCT_NAME;
   elements.adapter_name.textContent = newSession.adapterLabel;
@@ -997,7 +991,9 @@ async function endSession(safeStop = true) {
   }
   currentStatus = null;
   currentParams = null;
-  resetEncoderCalibration();
+  autotuneAbortRequested = true;
+  autotuneBusy = false;
+  resetAutotuneDisplay();
   resetLiveDisplay();
   clearParameterForm();
   setInteractive(false);
@@ -1082,7 +1078,7 @@ function updateProgressState(state) {
 }
 
 async function performFirmwareUpdate(recoveryMode) {
-  if (!selectedUpdate || updateInProgress || calibrationRecording() || calibrationBusy ||
+  if (!selectedUpdate || updateInProgress || autotuneBusy ||
       !elements.update_confirm.checked) return;
   if (!recoveryMode && (!session || selectedUpdate.header.imageVersion <= session.version)) return;
 
@@ -1229,123 +1225,311 @@ function populateParameterForm() {
   setControlMode(controlMode);
 }
 
-async function startEncoderCalibration() {
-  if (!session || !currentParams || !currentStatus || calibrationBusy ||
-      calibrationRecording()) return;
-  const turns = Number(elements.calibration_turns.value);
-  if (!Number.isInteger(turns) || turns < 1 || turns > 100) {
-    toast("正向转动圈数必须是 1 至 100 的整数", "error");
+async function disableAllMotors(activeSession) {
+  for (let motor = 0; motor < MOTOR_NAMES.length; motor += 1) {
+    await activeSession.setEnable(motor, false);
+  }
+}
+
+function assertAutotuneActive(activeSession) {
+  if (autotuneAbortRequested) throw new MotorAutotuneError("用户要求停止自动整定");
+  if (session !== activeSession) throw new MotorAutotuneError("设备已断开");
+}
+
+async function collectAutotuneStage({
+  activeSession,
+  motor,
+  stage,
+  durationMs,
+  keepalive,
+  progressStart,
+  progressEnd,
+}) {
+  const samples = [];
+  const started = performance.now();
+  let nextKeepalive = started;
+  while (performance.now() - started < durationMs) {
+    assertAutotuneActive(activeSession);
+    const cycleStarted = performance.now();
+    if (keepalive && cycleStarted >= nextKeepalive) {
+      await keepalive();
+      nextKeepalive = cycleStarted + AUTOTUNE_KEEPALIVE_PERIOD_MS;
+    }
+    const status = await activeSession.getStatus();
+    assertAutotuneActive(activeSession);
+    assertSafeAutotuneStatus(status, motor);
+    if (status.estopLatched) throw new MotorAutotuneError("整定期间急停被锁存");
+    if (status.faults !== 0) {
+      throw new MotorAutotuneError(`整定期间设备故障 ${hex(status.faults)}`);
+    }
+    if (Number.isInteger(autotuneReport?.encoderErrorsBefore)) {
+      const errorDelta = (
+        status.motors[motor].encoderErrors - autotuneReport.encoderErrorsBefore
+      ) >>> 0;
+      if (errorDelta !== 0) {
+        throw new MotorAutotuneError(`整定期间新增 ${errorDelta} 次编码器跳变错误`);
+      }
+    }
+    currentStatus = status;
+    updateStatusDisplay();
+    recordStatus(status);
+    const elapsed = performance.now() - started;
+    const sample = makeAutotuneSample(stage, elapsed, status, motor);
+    samples.push(sample);
+    const ratio = Math.min(1, elapsed / durationMs);
+    setAutotuneProgress(progressStart + (progressEnd - progressStart) * ratio);
+    const remaining = AUTOTUNE_SAMPLE_PERIOD_MS - (performance.now() - cycleStarted);
+    if (remaining > 0) await sleep(remaining);
+  }
+  if (samples.length < 2) throw new MotorAutotuneError(`${stage} 采样不足`);
+  return samples;
+}
+
+async function startMotorAutotune() {
+  if (!session || !currentParams || !currentStatus || autotuneBusy) return;
+  const direction = selectedAutotuneDirection();
+  if (!elements.autotune_confirm_lifted.checked ||
+      !elements.autotune_confirm_scale.checked || !direction) {
+    toast("请完成两项安全确认并选择机械方向状态", "error");
     return;
   }
 
   const activeSession = session;
   const motor = selectedMotor;
-  calibrationBusy = true;
-  setCalibrationState("正在确认全部停机", "busy");
+  let originalParams = null;
+  let activeStage = "prepare";
+  let success = false;
+  autotuneBusy = true;
+  autotuneAbortRequested = false;
+  pollGeneration += 1;
+  resetAutotuneDisplay("正在准备");
+  autotuneReport = {
+    timestamp: new Date().toISOString(),
+    applicationVersion: hex(activeSession.version),
+    motor,
+    motorName: MOTOR_NAMES[motor],
+    mechanicalDirection: direction === "forward" ? "confirmed-forward" : "unknown",
+    saved: false,
+    records: [],
+  };
+  setAutotuneState("正在准备", "busy");
+  setAutotuneStage("prepare", "active", "停机中");
   setInteractive(true);
+
   try {
-    for (let index = 0; index < MOTOR_NAMES.length; index += 1) {
-      await activeSession.setEnable(index, false);
+    await sleep(POLL_INTERVAL_MS + 20);
+    assertAutotuneActive(activeSession);
+    await disableAllMotors(activeSession);
+    originalParams = await activeSession.getParams();
+    let status = await activeSession.getStatus();
+    if (status.estopLatched) {
+      await activeSession.clearEstop();
+      status = await activeSession.getStatus();
     }
-    const [params, status] = await Promise.all([
-      activeSession.getParams(),
-      activeSession.getStatus(),
-    ]);
-    if (session !== activeSession) throw new ProtocolError("设备已断开");
+    assertSafeAutotuneStatus(status, motor);
     if (status.motors.some((item) => item.enabled)) {
-      throw new ProtocolError("仍有电机处于使能状态");
+      throw new MotorAutotuneError("停机确认失败");
     }
-
-    currentParams = params;
+    autotuneReport.paramsBefore = clone(originalParams);
+    autotuneReport.encoderErrorsBefore = status.motors[motor].encoderErrors;
+    let candidate = decodeParams(encodeParams(makeAutotuneCandidate(originalParams, motor)));
+    await activeSession.setParams(candidate);
+    currentParams = candidate;
     currentStatus = status;
-    const statusMotor = status.motors[motor];
-    encoderCalibration = {
-      phase: "recording",
+    populateParameterForm();
+    updateStatusDisplay();
+    setAutotuneProgress(7);
+    setAutotuneStage("prepare", "done", "已备份");
+
+    const baseline = await collectAutotuneStage({
+      activeSession,
       motor,
-      turns,
-      startCount: statusMotor.encoderCount,
-      startErrors: statusMotor.encoderErrors,
-      currentCount: statusMotor.encoderCount,
-      currentErrors: statusMotor.encoderErrors,
-      failure: null,
-    };
-    populateParameterForm();
-    updateStatusDisplay();
-    toast(`电机 ${MOTOR_NAMES[motor]} 已开始记录，正向手转 ${turns} 圈`);
-  } catch (error) {
-    encoderCalibration = null;
-    setCalibrationState("无法开始标定", "error");
-    toast(`标定启动失败：${error.message}`, "error");
-  } finally {
-    calibrationBusy = false;
-    updateEncoderCalibrationDisplay();
-    setInteractive(Boolean(session));
-  }
-}
-
-async function finishEncoderCalibration() {
-  if (!session || !currentParams || !currentStatus || calibrationBusy ||
-      !calibrationRecording()) return;
-  const activeSession = session;
-  const calibration = encoderCalibration;
-  calibrationBusy = true;
-  calibration.failure = null;
-  setCalibrationState("正在校验并保存", "busy");
-  setInteractive(true);
-  try {
-    const status = await activeSession.getStatus();
-    if (session !== activeSession) throw new ProtocolError("设备已断开");
-    const statusMotor = status.motors[calibration.motor];
-    const result = calculateEncoderCalibration({
-      startCount: calibration.startCount,
-      currentCount: statusMotor.encoderCount,
-      startErrors: calibration.startErrors,
-      currentErrors: statusMotor.encoderErrors,
-      turns: calibration.turns,
+      stage: "baseline",
+      durationMs: 400,
+      keepalive: null,
+      progressStart: 7,
+      progressEnd: 10,
     });
+    autotuneReport.records.push(...baseline);
 
-    const candidate = clone(currentParams);
-    const motorParams = candidate.motors[calibration.motor];
-    motorParams.encoderCountsPerRev = result.effectiveCountsPerRev;
-    motorParams.gearRatioQ16 = result.gearRatioQ16;
-    motorParams.invertEncoder = result.invertEncoder;
-    const normalized = decodeParams(encodeParams(candidate));
-    await activeSession.setParams(normalized);
-    await activeSession.saveParams();
-    currentParams = await activeSession.getParams();
-    currentStatus = await activeSession.getStatus();
-    encoderCalibration = {
-      ...calibration,
-      phase: "saved",
-      currentCount: statusMotor.encoderCount,
-      currentErrors: statusMotor.encoderErrors,
-      result,
-      failure: null,
-    };
+    activeStage = "open";
+    setAutotuneState("开环辨识", "busy");
+    setAutotuneStage("open", "active", "10%");
+    const summaries = [];
+    for (let index = 0; index < AUTOTUNE_DUTIES_PERMILLE.length; index += 1) {
+      const duty = AUTOTUNE_DUTIES_PERMILLE[index];
+      setAutotuneStage("open", "active", `${duty / 10}%`);
+      const stepStart = 10 + index * 14;
+      const stepSamples = await collectAutotuneStage({
+        activeSession,
+        motor,
+        stage: `open_${duty}`,
+        durationMs: 1400,
+        keepalive: () => activeSession.setOpenLoop(motor, duty),
+        progressStart: stepStart,
+        progressEnd: stepStart + 10,
+      });
+      await activeSession.setEnable(motor, false);
+      const summary = summarizeAutotuneStep(stepSamples, duty);
+      if (summary.encoderErrorDelta !== 0) {
+        throw new MotorAutotuneError(
+          `${duty / 10}% 阶跃新增 ${summary.encoderErrorDelta} 次编码器跳变错误`,
+        );
+      }
+      summaries.push(summary);
+      autotuneReport.records.push(...stepSamples);
+      const rest = await collectAutotuneStage({
+        activeSession,
+        motor,
+        stage: `rest_${duty}`,
+        durationMs: 500,
+        keepalive: null,
+        progressStart: stepStart + 10,
+        progressEnd: stepStart + 14,
+      });
+      autotuneReport.records.push(...rest);
+    }
+    autotuneReport.openLoop = summaries;
+    setAutotuneStage("open", "done", "已采样");
+
+    activeStage = "identify";
+    setAutotuneState("计算 PI", "busy");
+    setAutotuneStage("identify", "active", "计算中");
+    const design = designAutotunePi(summaries);
+    const signedTopSpeed = summaries.at(-1).signedSteadySpeedRpm;
+    const feedbackInverted = signedTopSpeed < 0;
+    const motorParams = candidate.motors[motor];
+    if (feedbackInverted) motorParams.invertEncoder = motorParams.invertEncoder ? 0 : 1;
+    motorParams.kpQ16 = design.kpQ16;
+    motorParams.kiQ16 = design.kiQ16;
+    motorParams.kdQ16 = 0;
+    motorParams.kawQ16 = Math.round(0.25 * 65536);
+    motorParams.derivativeAlphaQ16 = Math.round(0.20 * 65536);
+    candidate = decodeParams(encodeParams(candidate));
+    await activeSession.setParams(candidate);
+    currentParams = candidate;
     populateParameterForm();
-    updateStatusDisplay();
-    toast(
-      `电机 ${MOTOR_NAMES[calibration.motor]} 已保存 ${result.effectiveCountsPerRev} 计数/输出轴转`,
+    renderAutotuneIdentification(design, feedbackInverted);
+    autotuneReport.piDesign = design;
+    autotuneReport.feedbackInverted = feedbackInverted;
+    autotuneReport.paramsCandidate = clone(candidate);
+    setAutotuneProgress(58);
+    setAutotuneStage("identify", "done", `Q16 ${design.kpQ16}/${design.kiQ16}`);
+
+    activeStage = "closed";
+    const targetRpm = chooseAutotuneTargetRpm(
+      summaries.at(-1).steadySpeedRpm,
+      candidate.motors[motor].maxSpeedMrpm,
     );
-  } catch (error) {
-    calibration.failure = error.message;
+    const targetMrpm = Math.round(targetRpm * 1000);
+    setAutotuneState("闭环验收", "busy");
+    setAutotuneStage("closed", "active", `${targetRpm.toFixed(1)} rpm`);
+    const closedSamples = await collectAutotuneStage({
+      activeSession,
+      motor,
+      stage: "closed_loop",
+      durationMs: 4000,
+      keepalive: () => activeSession.setSpeed(motor, targetMrpm),
+      progressStart: 60,
+      progressEnd: 92,
+    });
+    await activeSession.setEnable(motor, false);
+    autotuneReport.records.push(...closedSamples);
+    const closedLoop = analyzeAutotuneClosedLoop(closedSamples, targetRpm, 200);
+    autotuneReport.closedLoop = closedLoop;
+    renderAutotuneClosedLoop(closedLoop);
+    if (!closedLoop.passed) {
+      throw new MotorAutotuneError(
+        `闭环验收未通过：平均误差 ${closedLoop.meanAbsErrorRpm.toFixed(2)} rpm，超调 ${closedLoop.overshootPercent.toFixed(1)}%`,
+      );
+    }
+    setAutotuneStage("closed", "done", "通过");
+
+    activeStage = "save";
+    setAutotuneState("保存参数", "busy");
+    setAutotuneStage("save", "active", "写入中");
+    await disableAllMotors(activeSession);
+    await activeSession.saveParams();
+    success = true;
+    autotuneReport.saved = true;
     try {
       currentParams = await activeSession.getParams();
-      populateParameterForm();
-    } catch { /* 保留当前表单，等待重新连接或重试。 */ }
-    toast(`标定保存失败：${error.message}`, "error");
+    } catch (readbackError) {
+      currentParams = candidate;
+      autotuneReport.postSaveReadbackError = readbackError.message;
+    }
+    autotuneReport.paramsAfter = clone(currentParams);
+    populateParameterForm();
+    setAutotuneProgress(100);
+    setAutotuneStage("save", "done", "已保存");
+    setAutotuneState("整定通过 · 已保存", "saved");
+    toast(`电机 ${MOTOR_NAMES[motor]} 自动整定通过并已保存`);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    autotuneReport.error = reason;
+    autotuneReport.saved = false;
+    setAutotuneStage(activeStage, "error", "失败");
+    setAutotuneState(
+      autotuneAbortRequested ? "已急停并回滚" : "整定失败 · 已回滚",
+      "error",
+    );
+    if (session === activeSession) {
+      try { await activeSession.estop(); } catch { /* 继续执行参数回滚。 */ }
+      try { await disableAllMotors(activeSession); } catch { /* 急停已先执行。 */ }
+      if (originalParams) {
+        try {
+          await activeSession.setParams(originalParams);
+          currentParams = await activeSession.getParams();
+          autotuneReport.rollback = "已恢复启动前 RAM 参数；急停保持锁存";
+          populateParameterForm();
+        } catch (rollbackError) {
+          autotuneReport.rollback = `回滚失败：${rollbackError.message}`;
+        }
+      }
+    }
+    toast(`自动整定停止：${reason}`, "error");
   } finally {
-    calibrationBusy = false;
-    updateEncoderCalibrationDisplay();
+    if (success && session === activeSession) {
+      try { await disableAllMotors(activeSession); } catch { /* 超时保护仍会停机。 */ }
+    }
+    autotuneBusy = false;
+    autotuneAbortRequested = false;
+    if (session === activeSession) {
+      try {
+        currentStatus = await activeSession.getStatus();
+        updateStatusDisplay();
+      } catch { /* 普通轮询会继续处理连接状态。 */ }
+      startPolling();
+    }
     setInteractive(Boolean(session));
+    setAutotuneControls(Boolean(session));
   }
 }
 
-function cancelEncoderCalibration() {
-  if (!calibrationRecording() || calibrationBusy) return;
-  resetEncoderCalibration("已取消");
-  setInteractive(Boolean(session));
-  toast("编码器标定已取消");
+async function stopMotorAutotune() {
+  if (!autotuneBusy || !session) return;
+  autotuneAbortRequested = true;
+  elements.autotune_stop_button.disabled = true;
+  setAutotuneState("正在急停并回滚", "busy");
+  try {
+    await session.estop();
+    await Promise.allSettled(MOTOR_NAMES.map((_, motor) => session.setEnable(motor, false)));
+  } catch { /* 主整定流程负责再次急停和回滚。 */ }
+}
+
+function exportAutotuneReport() {
+  if (!autotuneReport) return;
+  const blob = new Blob(
+    [JSON.stringify(autotuneReport, null, 2)],
+    { type: "application/json;charset=utf-8" },
+  );
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `m4-autotune-${MOTOR_NAMES[autotuneReport.motor]}-${
+    autotuneReport.timestamp.replaceAll(":", "-")
+  }.json`;
+  link.click();
+  URL.revokeObjectURL(link.href);
 }
 
 function exportCsv() {
@@ -1418,6 +1602,7 @@ function bindEvents() {
   elements.estop_button.addEventListener("click", async () => {
     if (!session) return;
     try {
+      if (autotuneBusy) autotuneAbortRequested = true;
       await session.estop();
       toast("四路急停已锁存");
     } catch (error) { toast(error.message, "error"); }
@@ -1520,13 +1705,19 @@ function bindEvents() {
     } catch (error) { toast(error.message, "error"); }
   });
 
-  elements.calibration_start_button.addEventListener("click", startEncoderCalibration);
-  elements.calibration_finish_button.addEventListener("click", finishEncoderCalibration);
-  elements.calibration_cancel_button.addEventListener("click", cancelEncoderCalibration);
+  elements.autotune_confirm_lifted.addEventListener("change", () => setAutotuneControls());
+  elements.autotune_confirm_scale.addEventListener("change", () => setAutotuneControls());
+  document.querySelectorAll('input[name="autotune-direction"]').forEach((input) => {
+    input.addEventListener("change", () => setAutotuneControls());
+  });
+  elements.autotune_start_button.addEventListener("click", startMotorAutotune);
+  elements.autotune_stop_button.addEventListener("click", stopMotorAutotune);
+  elements.autotune_export_button.addEventListener("click", exportAutotuneReport);
 
   window.addEventListener("resize", renderCharts);
   window.addEventListener("beforeunload", () => {
     pollGeneration += 1;
+    autotuneAbortRequested = true;
   });
 }
 
@@ -1542,7 +1733,7 @@ function initialize() {
   createMotorSelectors();
   createStatusRows();
   selectMotor(0);
-  resetEncoderCalibration();
+  resetAutotuneDisplay();
   setControlMode("open");
   setInteractive(false);
   resetUpdateProgress();

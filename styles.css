@@ -272,6 +272,7 @@ h2 {
 .status-table-panel,
 .parameter-form-panel,
 .global-params-panel,
+.motor-autotune-panel,
 .update-file-panel,
 .update-process-panel,
 .update-action-panel {
@@ -1030,7 +1031,7 @@ tbody tr:last-child td {
 
 .parameter-form-panel,
 .global-params-panel,
-.encoder-calibration-panel {
+.motor-autotune-panel {
   padding: 15px;
 }
 
@@ -1081,8 +1082,7 @@ tbody tr:last-child td {
 }
 
 .global-params-panel {
-  position: sticky;
-  top: 14px;
+  position: static;
 }
 
 .global-params-panel h2 {
@@ -1094,7 +1094,7 @@ tbody tr:last-child td {
   border-top: 1px solid var(--line-soft);
 }
 
-.encoder-calibration-panel {
+.motor-autotune-panel {
   grid-column: 1 / -1;
 }
 
@@ -1142,20 +1142,6 @@ tbody tr:last-child td {
   background: var(--black);
 }
 
-.calibration-layout {
-  display: grid;
-  grid-template-columns: minmax(360px, 0.85fr) minmax(520px, 1.15fr);
-  gap: 20px;
-  align-items: stretch;
-}
-
-.calibration-setup {
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) 142px;
-  gap: 12px 16px;
-  align-items: end;
-}
-
 .calibration-target {
   margin: 0;
   display: grid;
@@ -1168,10 +1154,6 @@ tbody tr:last-child td {
   padding: 8px 10px;
   border: 1px solid var(--line-soft);
   border-radius: 5px;
-}
-
-.calibration-turns {
-  margin: 0;
 }
 
 .calibration-actions {
@@ -1205,6 +1187,152 @@ tbody tr:last-child td {
   overflow-wrap: anywhere;
   text-overflow: clip;
   white-space: normal;
+}
+
+.autotune-layout {
+  display: grid;
+  grid-template-columns: minmax(350px, 0.82fr) minmax(430px, 1.18fr);
+  gap: 18px 22px;
+  align-items: start;
+}
+
+.autotune-setup {
+  display: grid;
+  gap: 13px;
+}
+
+.autotune-confirmations {
+  display: grid;
+  gap: 8px;
+  padding-block: 11px;
+  border-block: 1px solid var(--line-soft);
+}
+
+.autotune-confirmations label,
+.direction-choice label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.direction-choice {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  border: 0;
+}
+
+.direction-choice legend {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font: 700 9px/1 ui-monospace, "Cascadia Mono", monospace;
+}
+
+.direction-choice:disabled,
+.autotune-confirmations:has(input:disabled) {
+  opacity: 0.58;
+}
+
+.autotune-process {
+  min-width: 0;
+}
+
+.autotune-progress-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.autotune-progress-row progress {
+  width: 100%;
+  height: 7px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 2px;
+  background: #e1e5e8;
+}
+
+.autotune-progress-row progress::-webkit-progress-bar {
+  background: #e1e5e8;
+}
+
+.autotune-progress-row progress::-webkit-progress-value {
+  background: #168563;
+}
+
+.autotune-progress-row strong {
+  color: var(--muted);
+  font: 700 10px/1 ui-monospace, "Cascadia Mono", monospace;
+  text-align: right;
+}
+
+.autotune-stages {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  list-style: none;
+  border-top: 1px solid var(--line-soft);
+}
+
+.autotune-stages li {
+  min-width: 0;
+  min-height: 43px;
+  padding: 8px 9px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 76px;
+  gap: 9px;
+  align-items: center;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.autotune-stages span,
+.autotune-stages em {
+  color: var(--muted);
+  font: 700 9px/1 ui-monospace, "Cascadia Mono", monospace;
+  font-style: normal;
+}
+
+.autotune-stages em {
+  text-align: right;
+}
+
+.autotune-stages strong {
+  font-size: 11px;
+}
+
+.autotune-stages li[data-state="active"] {
+  box-shadow: inset 3px 0 #c67417;
+  background: #fff8ed;
+}
+
+.autotune-stages li[data-state="done"] {
+  box-shadow: inset 3px 0 #168563;
+  background: #edf8f4;
+}
+
+.autotune-stages li[data-state="error"] {
+  box-shadow: inset 3px 0 #b42318;
+  background: #fff0ef;
+}
+
+.autotune-metrics {
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+}
+
+.autotune-metrics > div {
+  min-height: 64px;
+}
+
+.autotune-metrics dd {
+  font-size: 11px;
 }
 
 .toast {
@@ -1261,8 +1389,12 @@ tbody tr:last-child td {
     grid-column: 1 / -1;
   }
 
-  .calibration-layout {
-    grid-template-columns: 1fr;
+  .autotune-layout {
+    grid-template-columns: minmax(320px, 0.9fr) minmax(390px, 1.1fr);
+  }
+
+  .autotune-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .update-layout {
@@ -1333,6 +1465,10 @@ tbody tr:last-child td {
 
   .parameter-channel-panel .motor-select-meta span {
     display: none;
+  }
+
+  .autotune-layout {
+    grid-template-columns: 1fr;
   }
 
 }
@@ -1419,7 +1555,6 @@ tbody tr:last-child td {
     gap: 11px;
   }
 
-  .calibration-setup,
   .calibration-target,
   .calibration-metrics {
     grid-template-columns: 1fr;
@@ -1427,6 +1562,10 @@ tbody tr:last-child td {
 
   .calibration-actions {
     flex-wrap: wrap;
+  }
+
+  .autotune-metrics {
+    grid-template-columns: 1fr;
   }
 }
 

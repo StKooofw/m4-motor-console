@@ -259,37 +259,61 @@
             </dl>
           </aside>
 
-          <section class="encoder-calibration-panel">
+          <section class="motor-autotune-panel">
             <div class="panel-title-row calibration-heading">
               <div>
-                <div class="panel-eyebrow">ENCODER CALIBRATION</div>
-                <h2>输出轴计数标定</h2>
+                <div class="panel-eyebrow">CLOSED-LOOP AUTOTUNE</div>
+                <h2>电机速度环自动整定</h2>
               </div>
-              <span class="calibration-state" id="calibration-state" data-state="idle">等待开始</span>
+              <span class="calibration-state" id="autotune-state" data-state="idle">等待开始</span>
             </div>
-            <div class="calibration-layout">
-              <div class="calibration-setup">
+
+            <div class="autotune-layout">
+              <div class="autotune-setup">
                 <dl class="calibration-target">
-                  <div><dt>当前通道</dt><dd id="calibration-motor">电机 A</dd></div>
-                  <div><dt>保存方式</dt><dd>等效 CPR · 1.0:1</dd></div>
+                  <div><dt>当前通道</dt><dd id="autotune-motor">电机 A</dd></div>
+                  <div><dt>开环阶跃</dt><dd>10% · 15% · 20%</dd></div>
                 </dl>
-                <label class="field-block calibration-turns" for="calibration-turns">
-                  <span>正向转动圈数</span>
-                  <input id="calibration-turns" type="number" min="1" max="100" step="1" value="5" disabled>
-                </label>
+                <div class="autotune-confirmations">
+                  <label><input id="autotune-confirm-lifted" type="checkbox" disabled>轮子已架空，允许所选电机短时转动</label>
+                  <label><input id="autotune-confirm-scale" type="checkbox" disabled>当前编码器计数与减速比已经校准</label>
+                </div>
+                <fieldset class="direction-choice" id="autotune-direction-choice" disabled>
+                  <legend>机械方向</legend>
+                  <label><input type="radio" name="autotune-direction" value="forward">正命令已确认为机械前进</label>
+                  <label><input type="radio" name="autotune-direction" value="unknown">机械方向未知，仅统一反馈符号</label>
+                </fieldset>
                 <div class="calibration-actions">
-                  <button class="button button-dark" id="calibration-start-button" type="button" disabled>开始记录</button>
-                  <button class="button button-dark" id="calibration-finish-button" type="button" disabled>完成并保存</button>
-                  <button class="button button-secondary" id="calibration-cancel-button" type="button" disabled>取消</button>
+                  <button class="button button-dark" id="autotune-start-button" type="button" disabled>开始自动整定</button>
+                  <button class="button button-danger" id="autotune-stop-button" type="button" disabled>立即停止</button>
+                  <button class="button button-secondary" id="autotune-export-button" type="button" disabled>导出报告</button>
                 </div>
               </div>
-              <dl class="calibration-metrics">
-                <div><dt>起点计数</dt><dd id="calibration-start-count">--</dd></div>
-                <div><dt>当前计数</dt><dd id="calibration-current-count">--</dd></div>
-                <div><dt>净计数</dt><dd id="calibration-delta">--</dd></div>
-                <div><dt>估算计数 / 圈</dt><dd id="calibration-effective-cpr">--</dd></div>
-                <div><dt>计数方向</dt><dd id="calibration-direction">--</dd></div>
-                <div><dt>新增跳变错误</dt><dd id="calibration-error-delta">--</dd></div>
+
+              <div class="autotune-process">
+                <div class="autotune-progress-row">
+                  <progress id="autotune-progress" max="100" value="0">0%</progress>
+                  <strong id="autotune-progress-label">0%</strong>
+                </div>
+                <ol class="autotune-stages">
+                  <li data-autotune-stage="prepare" data-state="pending"><span>01</span><strong>备份与停机</strong><em>等待</em></li>
+                  <li data-autotune-stage="open" data-state="pending"><span>02</span><strong>开环阶跃</strong><em>等待</em></li>
+                  <li data-autotune-stage="identify" data-state="pending"><span>03</span><strong>模型与 PI</strong><em>等待</em></li>
+                  <li data-autotune-stage="closed" data-state="pending"><span>04</span><strong>闭环验收</strong><em>等待</em></li>
+                  <li data-autotune-stage="save" data-state="pending"><span>05</span><strong>保存 Flash</strong><em>等待</em></li>
+                </ol>
+              </div>
+
+              <dl class="calibration-metrics autotune-metrics">
+                <div><dt>电机增益</dt><dd id="autotune-gain">--</dd></div>
+                <div><dt>估算死区</dt><dd id="autotune-deadzone">--</dd></div>
+                <div><dt>时间常数</dt><dd id="autotune-tau">--</dd></div>
+                <div><dt>延迟</dt><dd id="autotune-delay">--</dd></div>
+                <div><dt>KP / KI</dt><dd id="autotune-pi">--</dd></div>
+                <div><dt>闭环目标</dt><dd id="autotune-target">--</dd></div>
+                <div><dt>平均绝对误差</dt><dd id="autotune-mae">--</dd></div>
+                <div><dt>最大超调</dt><dd id="autotune-overshoot">--</dd></div>
+                <div><dt>反馈方向</dt><dd id="autotune-feedback">--</dd></div>
               </dl>
             </div>
           </section>
@@ -368,6 +392,6 @@
     </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-    <script type="module" src="./app.mjs?v=20260724-2"></script>
+    <script type="module" src="./app.mjs?v=20260724-3"></script>
   </body>
 </html>
