@@ -9,12 +9,22 @@ export const APP_HEADER_ADDRESS = 0x3000;
 export const APP_VECTOR = 0x3100;
 export const APP_END = 0x1f800;
 export const FLASH_SECTOR_SIZE = 0x400;
-export const BSL_PASSWORD_SIZE = 32;
 
 const SRAM_START = 0x20200000;
 const SRAM_END = 0x20208000;
 const RELEASE_FLAG = 1;
 const BSL_VERIFY_MIN_LENGTH = 1024;
+/*
+ * TI secondary BSL always requires a 32-byte unlock field. This board does
+ * not treat it as a user secret: keeping the fixed field inside the protocol
+ * client makes the project BIN the only file selected during an update.
+ */
+const BSL_UNLOCK_BYTES = Uint8Array.of(
+  0x8c, 0x80, 0xc0, 0x57, 0x2d, 0x53, 0x75, 0x11,
+  0xa5, 0x66, 0x17, 0xaa, 0x03, 0x40, 0xe6, 0x6b,
+  0xa5, 0x8d, 0x47, 0xfd, 0x6f, 0x20, 0x77, 0xf0,
+  0x57, 0x66, 0xf8, 0xac, 0xc6, 0x0c, 0x8c, 0x36,
+);
 
 const PACKET_HEADER = 0x80;
 const RESPONSE_HEADER = 0x08;
@@ -61,17 +71,6 @@ function hex(value, width = 8) {
 
 function uint32InRange(value, start, end) {
   return value >= start && value <= end;
-}
-
-/**
- * 更新密钥只由用户在本机选择，网页源码和浏览器存储均不保存该密钥。
- */
-export function validateBslPassword(input) {
-  const password = bytes(input);
-  if (password.length !== BSL_PASSWORD_SIZE) {
-    throw new BslError(`更新密钥必须正好为 ${BSL_PASSWORD_SIZE} 字节`);
-  }
-  return password.slice();
 }
 
 /**
@@ -163,10 +162,9 @@ function concat(...parts) {
  * TI 二级 BSL 客户端。transport 只需提供 write/readExact，便于浏览器和测试共用。
  */
 export class TiUartBsl {
-  constructor(transport, password, timeoutMs = 2500,
+  constructor(transport, timeoutMs = 2500,
       sleepFn = (ms) => new Promise((resolve) => setTimeout(resolve, ms))) {
     this.transport = transport;
-    this.password = validateBslPassword(password);
     this.timeoutMs = timeoutMs;
     this.sleep = sleepFn;
     this.identity = null;
@@ -241,7 +239,7 @@ export class TiUartBsl {
   }
 
   async unlock() {
-    this.checkMessage(await this.send(concat(Uint8Array.of(CMD_UNLOCK), this.password)));
+    this.checkMessage(await this.send(concat(Uint8Array.of(CMD_UNLOCK), BSL_UNLOCK_BYTES)));
   }
 
   async rangeErase(start, endSector) {

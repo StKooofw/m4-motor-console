@@ -13,7 +13,6 @@ import {
   BslError,
   TiUartBsl,
   validateApplicationImage,
-  validateBslPassword,
 } from "./firmware_update.mjs";
 
 const PRODUCT_NAME = "MSPM0G3507 四路电机控制器";
@@ -40,8 +39,7 @@ const elements = Object.fromEntries([
   "param-sequence", "param-crc", "update-file-input", "select-update-file-button",
   "update-file-name", "update-file-size", "update-current-version",
   "update-image-version", "update-board-id", "update-image-length",
-  "update-image-crc", "update-key-file-input", "select-update-key-button",
-  "update-key-name", "update-key-size", "update-confirm", "update-start-button",
+  "update-image-crc", "update-confirm", "update-start-button",
   "update-recovery-button", "update-progress", "update-progress-label",
   "update-state", "update-stage-file", "update-stage-bsl", "update-stage-program",
   "update-stage-restart", "toast",
@@ -59,7 +57,6 @@ let sampleHz = 0;
 let previousSampleTime = 0;
 let toastTimer = 0;
 let selectedUpdate = null;
-let selectedUpdateKey = null;
 let updateInProgress = false;
 
 function sleep(milliseconds) {
@@ -158,20 +155,16 @@ function setUpdatePercent(written, total) {
 function setUpdateControls() {
   const confirmed = elements.update_confirm.checked;
   const hasImage = selectedUpdate !== null;
-  const hasKey = selectedUpdateKey !== null;
   const isNewer = hasImage && session && selectedUpdate.header.imageVersion > session.version;
   elements.select_update_file_button.disabled = updateInProgress;
   elements.update_file_input.disabled = updateInProgress;
-  elements.select_update_key_button.disabled = updateInProgress;
-  elements.update_key_file_input.disabled = updateInProgress;
-  elements.update_confirm.disabled = updateInProgress || !hasImage || !hasKey;
-  elements.update_start_button.disabled = updateInProgress || !confirmed || !hasKey || !isNewer;
-  elements.update_recovery_button.disabled = updateInProgress || !confirmed || !hasImage || !hasKey || Boolean(session);
+  elements.update_confirm.disabled = updateInProgress || !hasImage;
+  elements.update_start_button.disabled = updateInProgress || !confirmed || !isNewer;
+  elements.update_recovery_button.disabled = updateInProgress || !confirmed || !hasImage || Boolean(session);
   elements.update_current_version.textContent = session ? firmwareLabel(session.version) : "未连接";
 
   if (updateInProgress) return;
   if (!hasImage) elements.update_state.textContent = "请选择应用升级包";
-  else if (!hasKey) elements.update_state.textContent = "请选择本机更新密钥";
   else if (!session) elements.update_state.textContent = "连接设备升级，或使用恢复模式";
   else if (!isNewer) elements.update_state.textContent = "普通升级要求固件版本高于当前版本";
   else elements.update_state.textContent = "镜像与设备已就绪";
@@ -205,30 +198,6 @@ async function selectUpdateFile(file) {
     setUpdateStage(elements.update_stage_file, "error", "无效");
     elements.update_state.textContent = error.message;
     toast(`固件拒绝：${error.message}`, "error");
-  }
-  setUpdateControls();
-}
-
-async function selectUpdateKey(file) {
-  selectedUpdateKey = null;
-  elements.update_key_name.textContent = file?.name || "未选择密钥";
-  elements.update_key_size.textContent = file ? fileSizeLabel(file.size) : "--";
-  elements.update_confirm.checked = false;
-  if (!file) {
-    setUpdateControls();
-    return;
-  }
-  try {
-    const password = validateBslPassword(new Uint8Array(await file.arrayBuffer()));
-    selectedUpdateKey = { file, password };
-    elements.update_key_size.textContent = `${password.length} B · 已加载`;
-    elements.update_state.textContent = selectedUpdate ? "镜像与本机密钥已就绪" : "更新密钥已加载";
-  } catch (error) {
-    elements.update_key_file_input.value = "";
-    elements.update_key_name.textContent = "密钥无效";
-    elements.update_key_size.textContent = "--";
-    elements.update_state.textContent = error.message;
-    toast(`密钥拒绝：${error.message}`, "error");
   }
   setUpdateControls();
 }
@@ -997,7 +966,7 @@ function updateProgressState(state) {
 }
 
 async function performFirmwareUpdate(recoveryMode) {
-  if (!selectedUpdate || !selectedUpdateKey || updateInProgress || !elements.update_confirm.checked) return;
+  if (!selectedUpdate || updateInProgress || !elements.update_confirm.checked) return;
   if (!recoveryMode && (!session || selectedUpdate.header.imageVersion <= session.version)) return;
 
   const image = selectedUpdate;
@@ -1033,7 +1002,7 @@ async function performFirmwareUpdate(recoveryMode) {
 
     rawTransport = new RawSerialTransport(port);
     await rawTransport.attach();
-    const bsl = new TiUartBsl(rawTransport, selectedUpdateKey.password, 2500);
+    const bsl = new TiUartBsl(rawTransport, 2500);
     elements.update_state.textContent = "正在校验引导配置并写入应用区";
     const result = await bsl.upload(image.image, { onProgress: updateProgressState });
     await rawTransport.detach();
@@ -1201,12 +1170,6 @@ function bindEvents() {
   });
   elements.update_file_input.addEventListener("change", async () => {
     await selectUpdateFile(elements.update_file_input.files?.[0] || null);
-  });
-  elements.select_update_key_button.addEventListener("click", () => {
-    if (!updateInProgress) elements.update_key_file_input.click();
-  });
-  elements.update_key_file_input.addEventListener("change", async () => {
-    await selectUpdateKey(elements.update_key_file_input.files?.[0] || null);
   });
   elements.update_confirm.addEventListener("change", setUpdateControls);
   elements.update_start_button.addEventListener("click", async () => {

@@ -573,37 +573,6 @@ dd {
   text-align: right;
 }
 
-.update-key-row {
-  min-height: 68px;
-  margin-top: 14px;
-  padding-top: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  border-top: 1px solid var(--line-soft);
-}
-
-.update-key-copy {
-  min-width: 0;
-  display: grid;
-  gap: 4px;
-}
-
-.update-key-copy span,
-.update-key-copy small {
-  color: var(--muted);
-  font: 9px/1.2 ui-monospace, "Cascadia Mono", monospace;
-}
-
-.update-key-copy strong {
-  overflow: hidden;
-  color: var(--ink);
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .update-stages {
   margin: 20px 0 0;
   padding: 0;
