@@ -235,7 +235,7 @@
 
             <div class="config-group-title">编码器与限幅</div>
             <div class="form-grid">
-              <label>编码器计数 / 电机转<input id="param-cpr" type="number" step="1" min="1"></label>
+              <label>编码器计数 / 每转<input id="param-cpr" type="number" step="1" min="1"></label>
               <label>减速比<input id="param-gear" type="number" step="0.001" min="0.001"></label>
               <label>最大速度 (rpm)<input id="param-max-speed" type="number" step="1" min="1"></label>
               <label>最大占空比 (%)<input id="param-max-duty" type="number" step="0.1" min="0.1" max="100"></label>
@@ -258,6 +258,41 @@
               <div><dt>记录 CRC</dt><dd id="param-crc">--</dd></div>
             </dl>
           </aside>
+
+          <section class="encoder-calibration-panel">
+            <div class="panel-title-row calibration-heading">
+              <div>
+                <div class="panel-eyebrow">ENCODER CALIBRATION</div>
+                <h2>输出轴计数标定</h2>
+              </div>
+              <span class="calibration-state" id="calibration-state" data-state="idle">等待开始</span>
+            </div>
+            <div class="calibration-layout">
+              <div class="calibration-setup">
+                <dl class="calibration-target">
+                  <div><dt>当前通道</dt><dd id="calibration-motor">电机 A</dd></div>
+                  <div><dt>保存方式</dt><dd>等效 CPR · 1.0:1</dd></div>
+                </dl>
+                <label class="field-block calibration-turns" for="calibration-turns">
+                  <span>正向转动圈数</span>
+                  <input id="calibration-turns" type="number" min="1" max="100" step="1" value="5" disabled>
+                </label>
+                <div class="calibration-actions">
+                  <button class="button button-dark" id="calibration-start-button" type="button" disabled>开始记录</button>
+                  <button class="button button-dark" id="calibration-finish-button" type="button" disabled>完成并保存</button>
+                  <button class="button button-secondary" id="calibration-cancel-button" type="button" disabled>取消</button>
+                </div>
+              </div>
+              <dl class="calibration-metrics">
+                <div><dt>起点计数</dt><dd id="calibration-start-count">--</dd></div>
+                <div><dt>当前计数</dt><dd id="calibration-current-count">--</dd></div>
+                <div><dt>净计数</dt><dd id="calibration-delta">--</dd></div>
+                <div><dt>估算计数 / 圈</dt><dd id="calibration-effective-cpr">--</dd></div>
+                <div><dt>计数方向</dt><dd id="calibration-direction">--</dd></div>
+                <div><dt>新增跳变错误</dt><dd id="calibration-error-delta">--</dd></div>
+              </dl>
+            </div>
+          </section>
         </div>
       </section>
 

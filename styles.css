@@ -1029,7 +1029,8 @@ tbody tr:last-child td {
 }
 
 .parameter-form-panel,
-.global-params-panel {
+.global-params-panel,
+.encoder-calibration-panel {
   padding: 15px;
 }
 
@@ -1093,6 +1094,119 @@ tbody tr:last-child td {
   border-top: 1px solid var(--line-soft);
 }
 
+.encoder-calibration-panel {
+  grid-column: 1 / -1;
+}
+
+.calibration-heading {
+  min-height: 42px;
+  margin-bottom: 14px;
+}
+
+.calibration-heading h2 {
+  margin: 3px 0 0;
+}
+
+.calibration-state {
+  min-width: 118px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--muted);
+  background: #f5f7f8;
+  font: 700 9px/1 ui-monospace, "Cascadia Mono", monospace;
+  text-align: center;
+}
+
+.calibration-state[data-state="recording"] {
+  border-color: #0b8f7b;
+  color: #076b5d;
+  background: #e8f7f3;
+}
+
+.calibration-state[data-state="busy"] {
+  border-color: #bb7a20;
+  color: #8b5311;
+  background: #fff7e8;
+}
+
+.calibration-state[data-state="error"] {
+  border-color: #c74a42;
+  color: #9f2f2a;
+  background: #fff0ef;
+}
+
+.calibration-state[data-state="saved"] {
+  border-color: var(--black);
+  color: #fff;
+  background: var(--black);
+}
+
+.calibration-layout {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.85fr) minmax(520px, 1.15fr);
+  gap: 20px;
+  align-items: stretch;
+}
+
+.calibration-setup {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 142px;
+  gap: 12px 16px;
+  align-items: end;
+}
+
+.calibration-target {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.calibration-target > div {
+  min-height: 50px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+}
+
+.calibration-turns {
+  margin: 0;
+}
+
+.calibration-actions {
+  grid-column: 1 / -1;
+  min-height: 34px;
+  display: flex;
+  gap: 8px;
+}
+
+.calibration-actions .button {
+  min-width: 112px;
+}
+
+.calibration-metrics {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid var(--line-soft);
+  border-left: 1px solid var(--line-soft);
+}
+
+.calibration-metrics > div {
+  min-width: 0;
+  min-height: 58px;
+  padding: 9px 11px;
+  border-right: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.calibration-metrics dd {
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
 .toast {
   position: fixed;
   z-index: 30;
@@ -1145,6 +1259,10 @@ tbody tr:last-child td {
   .global-params-panel {
     position: static;
     grid-column: 1 / -1;
+  }
+
+  .calibration-layout {
+    grid-template-columns: 1fr;
   }
 
   .update-layout {
@@ -1299,6 +1417,16 @@ tbody tr:last-child td {
     align-items: flex-start;
     flex-direction: column;
     gap: 11px;
+  }
+
+  .calibration-setup,
+  .calibration-target,
+  .calibration-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .calibration-actions {
+    flex-wrap: wrap;
   }
 }
 

@@ -14,6 +14,11 @@ import {
   TiUartBsl,
   validateApplicationImage,
 } from "./firmware_update.mjs";
+import {
+  calculateEncoderCalibration,
+  signedCounterDelta,
+  unsignedCounterDelta,
+} from "./encoder_calibration.mjs";
 
 const PRODUCT_NAME = "MSPM0G3507 四路电机控制器";
 const POLL_INTERVAL_MS = 50;
@@ -36,7 +41,11 @@ const elements = Object.fromEntries([
   "param-alpha", "param-cpr", "param-gear", "param-max-speed",
   "param-max-duty", "param-accel", "param-invert-motor",
   "param-invert-encoder", "param-timeout", "param-window", "param-version",
-  "param-sequence", "param-crc", "update-file-input", "select-update-file-button",
+  "param-sequence", "param-crc", "calibration-state", "calibration-motor",
+  "calibration-turns", "calibration-start-button", "calibration-finish-button",
+  "calibration-cancel-button", "calibration-start-count", "calibration-current-count",
+  "calibration-delta", "calibration-effective-cpr", "calibration-direction",
+  "calibration-error-delta", "update-file-input", "select-update-file-button",
   "update-file-name", "update-file-size", "update-current-version",
   "update-image-version", "update-board-id", "update-image-length",
   "update-image-crc", "update-confirm", "update-start-button",
@@ -58,6 +67,8 @@ let previousSampleTime = 0;
 let toastTimer = 0;
 let selectedUpdate = null;
 let updateInProgress = false;
+let encoderCalibration = null;
+let calibrationBusy = false;
 
 function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -103,14 +114,103 @@ function setConnectionState(state, label) {
   elements.connection_label.textContent = label;
 }
 
-function setInteractive(enabled) {
-  [
-    elements.estop_button, elements.enable_switch, elements.target_input,
-    elements.target_slider, elements.apply_control_button,
-    elements.stop_motor_button, elements.read_params_button,
-  ].forEach((control) => {
-    control.disabled = !enabled;
+function calibrationRecording() {
+  return encoderCalibration?.phase === "recording";
+}
+
+function setCalibrationState(label, state) {
+  elements.calibration_state.textContent = label;
+  elements.calibration_state.dataset.state = state;
+}
+
+function setEncoderCalibrationControls(enabled = Boolean(session)) {
+  const recording = calibrationRecording();
+  const available = enabled && currentParams && currentStatus;
+  let canFinish = false;
+  if (recording && currentStatus) {
+    const motor = currentStatus.motors[encoderCalibration.motor];
+    const delta = signedCounterDelta(encoderCalibration.startCount, motor.encoderCount);
+    const errors = unsignedCounterDelta(encoderCalibration.startErrors, motor.encoderErrors);
+    canFinish = delta !== 0 && errors === 0;
+  }
+
+  elements.calibration_turns.disabled = !available || recording || calibrationBusy;
+  elements.calibration_start_button.disabled = !available || recording || calibrationBusy;
+  elements.calibration_finish_button.disabled = !canFinish || calibrationBusy;
+  elements.calibration_cancel_button.disabled = !recording || calibrationBusy;
+  elements.calibration_start_button.textContent = encoderCalibration?.phase === "saved"
+    ? "重新标定"
+    : "开始记录";
+  document.querySelectorAll(".motor-select-button").forEach((button) => {
+    button.disabled = recording || calibrationBusy;
   });
+}
+
+function resetEncoderCalibration(label = "等待开始") {
+  encoderCalibration = null;
+  calibrationBusy = false;
+  elements.calibration_motor.textContent = `电机 ${MOTOR_NAMES[selectedMotor]}`;
+  elements.calibration_start_count.textContent = "--";
+  elements.calibration_current_count.textContent = "--";
+  elements.calibration_delta.textContent = "--";
+  elements.calibration_effective_cpr.textContent = "--";
+  elements.calibration_direction.textContent = "--";
+  elements.calibration_error_delta.textContent = "--";
+  setCalibrationState(label, "idle");
+  setEncoderCalibrationControls();
+}
+
+function updateEncoderCalibrationDisplay() {
+  if (!encoderCalibration) {
+    elements.calibration_motor.textContent = `电机 ${MOTOR_NAMES[selectedMotor]}`;
+    setEncoderCalibrationControls();
+    return;
+  }
+
+  const calibration = encoderCalibration;
+  const statusMotor = currentStatus?.motors[calibration.motor];
+  if (statusMotor) {
+    calibration.currentCount = statusMotor.encoderCount;
+    calibration.currentErrors = statusMotor.encoderErrors;
+  }
+  const countDelta = signedCounterDelta(calibration.startCount, calibration.currentCount);
+  const errorDelta = unsignedCounterDelta(calibration.startErrors, calibration.currentErrors);
+  const preview = Math.abs(countDelta) / calibration.turns;
+
+  elements.calibration_motor.textContent = `电机 ${MOTOR_NAMES[calibration.motor]}`;
+  elements.calibration_start_count.textContent = calibration.startCount.toLocaleString();
+  elements.calibration_current_count.textContent = calibration.currentCount.toLocaleString();
+  elements.calibration_delta.textContent = countDelta.toLocaleString();
+  elements.calibration_effective_cpr.textContent = countDelta === 0 ? "--" : preview.toFixed(1);
+  elements.calibration_direction.textContent = countDelta > 0
+    ? "正计数"
+    : countDelta < 0 ? "负计数 · 保存时反相" : "--";
+  elements.calibration_error_delta.textContent = errorDelta.toLocaleString();
+
+  if (calibration.phase === "saved") {
+    elements.calibration_effective_cpr.textContent =
+      calibration.result.effectiveCountsPerRev.toLocaleString();
+    setCalibrationState("已保存到 Flash", "saved");
+  } else if (calibrationBusy) {
+    setCalibrationState("正在处理", "busy");
+  } else if (errorDelta !== 0) {
+    setCalibrationState("跳变错误 · 取消重试", "error");
+  } else if (calibration.failure) {
+    setCalibrationState("标定失败 · 可重试", "error");
+  } else {
+    setCalibrationState(`正向转动 ${calibration.turns} 圈后完成`, "recording");
+  }
+  setEncoderCalibrationControls();
+}
+
+function setInteractive(enabled) {
+  const recording = calibrationRecording() || calibrationBusy;
+  elements.estop_button.disabled = !enabled;
+  [
+    elements.enable_switch, elements.target_input, elements.target_slider,
+    elements.apply_control_button, elements.stop_motor_button,
+    elements.read_params_button,
+  ].forEach((control) => { control.disabled = !enabled || recording; });
   const parameterControls = [
     elements.param_kp, elements.param_ki, elements.param_kd, elements.param_kaw,
     elements.param_alpha, elements.param_cpr, elements.param_gear,
@@ -119,11 +219,12 @@ function setInteractive(enabled) {
     elements.param_timeout, elements.param_window,
   ];
   parameterControls.forEach((control) => {
-    control.disabled = !enabled || !currentParams;
+    control.disabled = !enabled || !currentParams || recording;
   });
-  elements.apply_params_button.disabled = !enabled || !currentParams;
-  elements.save_params_button.disabled = !enabled || !currentParams;
-  if (!enabled) elements.clear_estop_button.disabled = true;
+  elements.apply_params_button.disabled = !enabled || !currentParams || recording;
+  elements.save_params_button.disabled = !enabled || !currentParams || recording;
+  if (!enabled || recording) elements.clear_estop_button.disabled = true;
+  setEncoderCalibrationControls(enabled);
   setUpdateControls();
 }
 
@@ -156,11 +257,13 @@ function setUpdateControls() {
   const confirmed = elements.update_confirm.checked;
   const hasImage = selectedUpdate !== null;
   const isNewer = hasImage && session && selectedUpdate.header.imageVersion > session.version;
-  elements.select_update_file_button.disabled = updateInProgress;
-  elements.update_file_input.disabled = updateInProgress;
-  elements.update_confirm.disabled = updateInProgress || !hasImage;
-  elements.update_start_button.disabled = updateInProgress || !confirmed || !isNewer;
-  elements.update_recovery_button.disabled = updateInProgress || !confirmed || !hasImage || Boolean(session);
+  const calibrationActive = calibrationRecording() || calibrationBusy;
+  elements.select_update_file_button.disabled = updateInProgress || calibrationActive;
+  elements.update_file_input.disabled = updateInProgress || calibrationActive;
+  elements.update_confirm.disabled = updateInProgress || calibrationActive || !hasImage;
+  elements.update_start_button.disabled = updateInProgress || calibrationActive || !confirmed || !isNewer;
+  elements.update_recovery_button.disabled = updateInProgress || calibrationActive ||
+    !confirmed || !hasImage || Boolean(session);
   elements.update_current_version.textContent = session ? firmwareLabel(session.version) : "未连接";
 
   if (updateInProgress) return;
@@ -582,8 +685,17 @@ function clearParameterForm() {
 }
 
 function selectMotor(index) {
+  if ((calibrationRecording() || calibrationBusy) &&
+      index !== encoderCalibration?.motor) {
+    toast("编码器标定期间不能切换通道", "error");
+    return;
+  }
+  const clearCompletedCalibration = encoderCalibration?.phase === "saved" &&
+    index !== encoderCalibration.motor;
   if (currentParams) captureParameterForm();
   selectedMotor = index;
+  if (clearCompletedCalibration) resetEncoderCalibration();
+  else elements.calibration_motor.textContent = `电机 ${MOTOR_NAMES[index]}`;
   document.querySelectorAll("[data-motor]").forEach((element) => {
     element.classList.toggle("is-active", Number(element.dataset.motor) === index);
   });
@@ -674,6 +786,7 @@ function updateStatusDisplay() {
   elements.control_output.textContent = `${(motor.outputPermille / 10).toFixed(1)} %`;
   elements.control_mode_readback.textContent = MODE_NAMES[motor.mode] || String(motor.mode);
   elements.control_errors.textContent = motor.encoderErrors.toLocaleString();
+  updateEncoderCalibrationDisplay();
 }
 
 function recordStatus(status) {
@@ -850,6 +963,7 @@ async function activateSession(newSession) {
   paused = false;
   sampleHz = 0;
   previousSampleTime = 0;
+  resetEncoderCalibration();
   elements.pause_button.textContent = "暂停";
   elements.device_name.textContent = PRODUCT_NAME;
   elements.adapter_name.textContent = newSession.adapterLabel;
@@ -882,6 +996,7 @@ async function endSession(safeStop = true) {
   }
   currentStatus = null;
   currentParams = null;
+  resetEncoderCalibration();
   resetLiveDisplay();
   clearParameterForm();
   setInteractive(false);
@@ -966,7 +1081,8 @@ function updateProgressState(state) {
 }
 
 async function performFirmwareUpdate(recoveryMode) {
-  if (!selectedUpdate || updateInProgress || !elements.update_confirm.checked) return;
+  if (!selectedUpdate || updateInProgress || calibrationRecording() || calibrationBusy ||
+      !elements.update_confirm.checked) return;
   if (!recoveryMode && (!session || selectedUpdate.header.imageVersion <= session.version)) return;
 
   const image = selectedUpdate;
@@ -1110,6 +1226,125 @@ function populateParameterForm() {
   elements.param_sequence.textContent = String(currentParams.sequence);
   elements.param_crc.textContent = hex(currentParams.crc32);
   setControlMode(controlMode);
+}
+
+async function startEncoderCalibration() {
+  if (!session || !currentParams || !currentStatus || calibrationBusy ||
+      calibrationRecording()) return;
+  const turns = Number(elements.calibration_turns.value);
+  if (!Number.isInteger(turns) || turns < 1 || turns > 100) {
+    toast("正向转动圈数必须是 1 至 100 的整数", "error");
+    return;
+  }
+
+  const activeSession = session;
+  const motor = selectedMotor;
+  calibrationBusy = true;
+  setCalibrationState("正在确认全部停机", "busy");
+  setInteractive(true);
+  try {
+    for (let index = 0; index < MOTOR_NAMES.length; index += 1) {
+      await activeSession.setEnable(index, false);
+    }
+    const [params, status] = await Promise.all([
+      activeSession.getParams(),
+      activeSession.getStatus(),
+    ]);
+    if (session !== activeSession) throw new ProtocolError("设备已断开");
+    if (status.motors.some((item) => item.enabled)) {
+      throw new ProtocolError("仍有电机处于使能状态");
+    }
+
+    currentParams = params;
+    currentStatus = status;
+    const statusMotor = status.motors[motor];
+    encoderCalibration = {
+      phase: "recording",
+      motor,
+      turns,
+      startCount: statusMotor.encoderCount,
+      startErrors: statusMotor.encoderErrors,
+      currentCount: statusMotor.encoderCount,
+      currentErrors: statusMotor.encoderErrors,
+      failure: null,
+    };
+    populateParameterForm();
+    updateStatusDisplay();
+    toast(`电机 ${MOTOR_NAMES[motor]} 已开始记录，正向手转 ${turns} 圈`);
+  } catch (error) {
+    encoderCalibration = null;
+    setCalibrationState("无法开始标定", "error");
+    toast(`标定启动失败：${error.message}`, "error");
+  } finally {
+    calibrationBusy = false;
+    updateEncoderCalibrationDisplay();
+    setInteractive(Boolean(session));
+  }
+}
+
+async function finishEncoderCalibration() {
+  if (!session || !currentParams || !currentStatus || calibrationBusy ||
+      !calibrationRecording()) return;
+  const activeSession = session;
+  const calibration = encoderCalibration;
+  calibrationBusy = true;
+  calibration.failure = null;
+  setCalibrationState("正在校验并保存", "busy");
+  setInteractive(true);
+  try {
+    const status = await activeSession.getStatus();
+    if (session !== activeSession) throw new ProtocolError("设备已断开");
+    const statusMotor = status.motors[calibration.motor];
+    const result = calculateEncoderCalibration({
+      startCount: calibration.startCount,
+      currentCount: statusMotor.encoderCount,
+      startErrors: calibration.startErrors,
+      currentErrors: statusMotor.encoderErrors,
+      turns: calibration.turns,
+    });
+
+    const candidate = clone(currentParams);
+    const motorParams = candidate.motors[calibration.motor];
+    motorParams.encoderCountsPerRev = result.effectiveCountsPerRev;
+    motorParams.gearRatioQ16 = result.gearRatioQ16;
+    motorParams.invertEncoder = result.invertEncoder;
+    const normalized = decodeParams(encodeParams(candidate));
+    await activeSession.setParams(normalized);
+    await activeSession.saveParams();
+    currentParams = await activeSession.getParams();
+    currentStatus = await activeSession.getStatus();
+    encoderCalibration = {
+      ...calibration,
+      phase: "saved",
+      currentCount: statusMotor.encoderCount,
+      currentErrors: statusMotor.encoderErrors,
+      result,
+      failure: null,
+    };
+    populateParameterForm();
+    updateStatusDisplay();
+    toast(
+      `电机 ${MOTOR_NAMES[calibration.motor]} 已保存 ${result.effectiveCountsPerRev} 计数/输出轴转`,
+    );
+  } catch (error) {
+    calibration.failure = error.message;
+    try {
+      currentParams = await activeSession.getParams();
+      populateParameterForm();
+    } catch { /* 保留当前表单，等待重新连接或重试。 */ }
+    toast(`标定保存失败：${error.message}`, "error");
+  } finally {
+    calibrationBusy = false;
+    updateEncoderCalibrationDisplay();
+    setInteractive(Boolean(session));
+  }
+}
+
+function cancelEncoderCalibration() {
+  if (!calibrationRecording() || calibrationBusy) return;
+  resetEncoderCalibration("已取消");
+  setInteractive(Boolean(session));
+  toast("编码器标定已取消");
 }
 
 function exportCsv() {
@@ -1282,6 +1517,10 @@ function bindEvents() {
     } catch (error) { toast(error.message, "error"); }
   });
 
+  elements.calibration_start_button.addEventListener("click", startEncoderCalibration);
+  elements.calibration_finish_button.addEventListener("click", finishEncoderCalibration);
+  elements.calibration_cancel_button.addEventListener("click", cancelEncoderCalibration);
+
   window.addEventListener("resize", renderCharts);
   window.addEventListener("beforeunload", () => {
     pollGeneration += 1;
@@ -1300,6 +1539,7 @@ function initialize() {
   createMotorSelectors();
   createStatusRows();
   selectMotor(0);
+  resetEncoderCalibration();
   setControlMode("open");
   setInteractive(false);
   resetUpdateProgress();
