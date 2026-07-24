@@ -19,6 +19,7 @@ import {
   signedCounterDelta,
   unsignedCounterDelta,
 } from "./encoder_calibration.mjs";
+import { sendMotorTarget } from "./motor_command.mjs";
 
 const PRODUCT_NAME = "MSPM0G3507 四路电机控制器";
 const POLL_INTERVAL_MS = 50;
@@ -1432,10 +1433,17 @@ function bindEvents() {
 
   elements.enable_switch.addEventListener("change", async () => {
     if (!session) return;
+    const requestedEnable = elements.enable_switch.checked;
     try {
-      await session.setEnable(selectedMotor, elements.enable_switch.checked);
+      if (requestedEnable) {
+        await sendMotorTarget(
+          session, selectedMotor, controlMode, elements.target_input.value,
+        );
+      } else {
+        await session.setEnable(selectedMotor, false);
+      }
     } catch (error) {
-      elements.enable_switch.checked = !elements.enable_switch.checked;
+      elements.enable_switch.checked = !requestedEnable;
       toast(error.message, "error");
     }
   });
@@ -1452,16 +1460,11 @@ function bindEvents() {
 
   elements.apply_control_button.addEventListener("click", async () => {
     if (!session) return;
-    const value = Number(elements.target_input.value);
-    if (!Number.isFinite(value)) return toast("目标值无效", "error");
     try {
-      if (!elements.enable_switch.checked) {
-        await session.setEnable(selectedMotor, false);
-      } else if (controlMode === "open") {
-        await session.setOpenLoop(selectedMotor, Math.round(value * 10));
-      } else {
-        await session.setSpeed(selectedMotor, Math.round(value * 1000));
-      }
+      await sendMotorTarget(
+        session, selectedMotor, controlMode, elements.target_input.value,
+      );
+      elements.enable_switch.checked = true;
       toast(`电机 ${MOTOR_NAMES[selectedMotor]} 目标已发送`);
     } catch (error) { toast(error.message, "error"); }
   });
