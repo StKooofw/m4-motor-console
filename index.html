@@ -3,395 +3,74 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#f1f3f5">
-    <title>M4 Motor Console</title>
+    <meta name="theme-color" content="#f1f3f4">
+    <title>MSPM0 Control Console</title>
     <link rel="icon" href="data:,">
-    <link rel="stylesheet" href="./styles.css">
+    <link rel="stylesheet" href="./product-selector.css?v=20260726-1">
   </head>
   <body>
-    <header class="site-header">
-      <div class="site-header__inner">
-        <div class="brand-block">
-          <div class="brand-mark" aria-hidden="true">M4</div>
-          <div>
-            <div class="brand-name">M4 MOTOR LAB</div>
-            <div class="brand-subtitle">PRECISION DRIVE · MOTION CONTROL</div>
-          </div>
-        </div>
-        <div class="header-meta">
-          <span>MSPM0G3507</span>
-          <span>UART · 115200 · 8N1</span>
-        </div>
-      </div>
+    <header class="selector-header">
+      <a class="selector-brand" href="./index.html" aria-label="返回产品选择">
+        <span class="selector-mark">M0</span>
+        <span><strong>CONTROL CONSOLE</strong><small>MSPM0G3507 · WEB SERIAL</small></span>
+      </a>
+      <span class="selector-link-state"><i></i> 浏览器直连 · UART 115200</span>
     </header>
 
-    <main class="app-shell">
-      <div class="support-banner" id="support-banner" hidden>
-        当前环境不支持 Web Serial。请使用桌面版 Chrome 或 Edge，并通过 localhost 或 HTTPS 打开。
-      </div>
-
-      <header class="tool-topbar">
-        <div>
-          <div class="section-kicker">WEB SERIAL MOTOR TOOL</div>
-          <h1>四路电机调试台</h1>
-        </div>
-        <div class="safety-actions">
-          <button class="button button-secondary" id="clear-estop-button" type="button" disabled>解除急停</button>
-          <button class="button button-danger" id="estop-button" type="button" disabled>全部急停</button>
-        </div>
+    <main class="selector-main">
+      <header class="selector-title">
+        <span>PRODUCT WORKSPACES</span>
+        <h1>选择产品工作台</h1>
+        <p>每种设备使用独立身份、控制协议和升级包。</p>
       </header>
 
-      <nav class="view-tabs" aria-label="工作区" role="tablist">
-        <button class="view-tab is-active" type="button" role="tab" aria-selected="true" data-view="monitor">实时监控</button>
-        <button class="view-tab" type="button" role="tab" aria-selected="false" data-view="parameters">参数设置</button>
-        <button class="view-tab" type="button" role="tab" aria-selected="false" data-view="update">固件升级</button>
-      </nav>
-
-      <section class="view-panel is-active" id="monitor-view" data-panel="monitor">
-        <div class="monitor-grid">
-          <aside class="left-rail" aria-label="连接与设备">
-            <section class="side-panel connection-panel">
-              <div class="panel-title-row">
-                <span class="panel-title">设备连接</span>
-                <div class="connection-state" id="connection-state" data-state="offline">
-                  <span class="status-dot" aria-hidden="true"></span>
-                  <span id="connection-label">未连接</span>
-                </div>
-              </div>
-              <label class="static-field">
-                <span>波特率</span>
-                <strong>115200</strong>
-              </label>
-              <button class="button button-dark button-block" id="connect-button" type="button">连接设备</button>
-            </section>
-
-            <section class="side-panel device-panel" aria-label="设备信息">
-              <div class="panel-eyebrow">DEVICE</div>
-              <strong class="device-name" id="device-name">等待设备</strong>
-              <span class="adapter-name" id="adapter-name">未授权串口</span>
-              <dl class="device-metrics">
-                <div><dt>固件</dt><dd id="firmware-version">--</dd></div>
-                <div><dt>运行时间</dt><dd id="uptime-value">--</dd></div>
-                <div><dt>故障字</dt><dd id="fault-value">--</dd></div>
-                <div><dt>采样链路</dt><dd id="link-rate">--</dd></div>
-              </dl>
-            </section>
-
-            <section class="side-panel channel-panel">
-              <div class="panel-title-row">
-                <span class="panel-title">电机通道</span>
-                <span class="panel-caption">A–D</span>
-              </div>
-              <div class="motor-selector" id="motor-selector" aria-label="选择电机"></div>
-            </section>
-          </aside>
-
-          <div class="workspace-column">
-            <section class="wave-panel" aria-label="实时波形">
-              <header class="panel-toolbar">
-                <div>
-                  <div class="section-kicker">LIVE TELEMETRY</div>
-                  <h2>编码器与闭环波形</h2>
-                </div>
-                <div class="toolbar-actions">
-                  <label class="compact-field">时间窗
-                    <select id="window-select">
-                      <option value="5">5 s</option>
-                      <option value="10" selected>10 s</option>
-                      <option value="30">30 s</option>
-                    </select>
-                  </label>
-                  <button class="button button-secondary" id="pause-button" type="button">暂停</button>
-                  <button class="button button-secondary" id="clear-chart-button" type="button">清空</button>
-                  <button class="button button-secondary" id="export-button" type="button" disabled>导出 CSV</button>
-                </div>
-              </header>
-
-              <div class="chart-stack">
-                <section class="chart-row">
-                  <header>
-                    <span>速度 <small>rpm</small></span>
-                    <strong id="speed-live">-- rpm</strong>
-                  </header>
-                  <div class="chart-legend"><span data-color="green">实际</span><span data-color="blue">目标</span></div>
-                  <canvas id="speed-chart" aria-label="速度波形"></canvas>
-                </section>
-                <section class="chart-row">
-                  <header>
-                    <span>编码器计数 <small>cnt</small></span>
-                    <strong id="encoder-live">-- cnt</strong>
-                  </header>
-                  <div class="chart-legend"><span data-color="amber">位置</span></div>
-                  <canvas id="encoder-chart" aria-label="编码器计数波形"></canvas>
-                </section>
-                <section class="chart-row">
-                  <header>
-                    <span>驱动输出 <small>%</small></span>
-                    <strong id="duty-live">-- %</strong>
-                  </header>
-                  <div class="chart-legend"><span data-color="red">占空比</span></div>
-                  <canvas id="duty-chart" aria-label="输出占空比波形"></canvas>
-                </section>
-              </div>
-            </section>
-
-            <section class="status-table-panel" aria-label="四路状态">
-              <header class="status-heading">
-                <div>
-                  <div class="section-kicker">ALL CHANNELS</div>
-                  <h2>四路实时状态</h2>
-                </div>
-                <span id="sample-state">等待采样</span>
-              </header>
-              <div class="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>通道</th><th>状态</th><th>编码器</th><th>实际速度</th>
-                      <th>目标速度</th><th>输出</th><th>模式</th><th>错误</th>
-                    </tr>
-                  </thead>
-                  <tbody id="status-body"></tbody>
-                </table>
-              </div>
-            </section>
+      <section class="product-grid" aria-label="产品类型">
+        <a class="product-card product-card--motor" href="./motor.html" aria-label="打开 4 路闭环电机驱动工作台">
+          <div class="product-media">
+            <img src="./assets/motor-controller-schematic.png" alt="四路闭环电机驱动板原理图">
+            <span class="product-index">01</span>
           </div>
-
-          <aside class="control-panel" aria-label="电机控制">
-            <div class="panel-title-row">
+          <div class="product-body">
+            <div class="product-heading">
               <div>
-                <div class="section-kicker">MOTOR CONTROL</div>
-                <h2 id="control-motor-title">电机 A</h2>
+                <span class="product-kind">四路闭环电机驱动</span>
+                <h2>Motor Control</h2>
               </div>
-              <label class="switch-field">
-                <input id="enable-switch" type="checkbox" disabled>
-                <span>使能</span>
-              </label>
+              <span class="product-status">CM4M</span>
             </div>
+            <p>A/B/C/D 四通道编码器、电机速度闭环、参数管理与单路自动整定。</p>
+            <ul class="capability-list" aria-label="支持能力">
+              <li>四通道控制</li><li>速度 PI</li><li>自动整定</li><li>UART 升级</li>
+            </ul>
+            <div class="open-product"><span>打开电机驱动工作台</span><b aria-hidden="true">→</b></div>
+          </div>
+        </a>
 
-            <div class="segmented-control" id="mode-control" aria-label="控制模式">
-              <button type="button" class="is-active" data-mode="open">开环</button>
-              <button type="button" data-mode="speed">速度</button>
-            </div>
-
-            <label class="field-block" for="target-input">
-              <span id="target-label">占空比</span>
-              <div class="number-with-unit">
-                <input id="target-input" type="number" value="0" step="1" disabled>
-                <span id="target-unit">%</span>
+        <a class="product-card product-card--chassis" href="./chassis.html" aria-label="打开灰度循迹小车底盘工作台">
+          <div class="product-media product-media--chassis">
+            <img src="./assets/gray16-interface.png" alt="16 路灰度传感器接口原理图">
+            <span class="product-index">02</span>
+          </div>
+          <div class="product-body">
+            <div class="product-heading">
+              <div>
+                <span class="product-kind">灰度循迹小车底盘</span>
+                <h2>Gray Chassis</h2>
               </div>
-            </label>
-            <input class="target-slider" id="target-slider" type="range" min="-100" max="100" value="0" disabled>
-
-            <div class="control-actions">
-              <button class="button button-dark" id="apply-control-button" type="button" disabled>发送目标</button>
-              <button class="button button-secondary" id="stop-motor-button" type="button" disabled>停止本路</button>
+              <span class="product-status product-status--green">CHAS</span>
             </div>
-
-            <dl class="control-readback">
-              <div><dt>实际速度</dt><dd id="control-speed">--</dd></div>
-              <div><dt>目标速度</dt><dd id="control-target">--</dd></div>
-              <div><dt>编码器</dt><dd id="control-encoder">--</dd></div>
-              <div><dt>输出</dt><dd id="control-output">--</dd></div>
-              <div><dt>模式</dt><dd id="control-mode-readback">--</dd></div>
-              <div><dt>跳变错误</dt><dd id="control-errors">--</dd></div>
-            </dl>
-
-          </aside>
-        </div>
+            <p>双轮差速、16 路灰度、ICM45686 航向、三串 PID 与角度环自动标定。</p>
+            <ul class="capability-list" aria-label="支持能力">
+              <li>通道自选</li><li>灰度识别</li><li>航向标定</li><li>UART 升级</li>
+            </ul>
+            <div class="open-product"><span>打开底盘工作台</span><b aria-hidden="true">→</b></div>
+          </div>
+        </a>
       </section>
 
-      <section class="view-panel" id="parameters-view" data-panel="parameters" hidden>
-        <header class="parameters-header">
-          <div>
-            <div class="section-kicker">CONTROL PARAMETERS</div>
-            <h2>闭环与编码器参数</h2>
-          </div>
-          <div class="toolbar-actions">
-            <button class="button button-secondary" id="read-params-button" type="button" disabled>读取设备</button>
-            <button class="button button-dark" id="apply-params-button" type="button" disabled>设置到 RAM</button>
-            <button class="button button-dark" id="save-params-button" type="button" disabled>保存到 Flash</button>
-          </div>
-        </header>
-
-        <div class="parameter-layout">
-          <aside class="side-panel parameter-channel-panel">
-            <div class="panel-title-row">
-              <span class="panel-title">参数通道</span>
-              <span class="panel-caption">选择电机</span>
-            </div>
-            <div class="motor-selector parameter-selector" id="parameter-motor-selector" aria-label="参数通道"></div>
-          </aside>
-
-          <section class="parameter-form-panel">
-            <div class="config-group-title">速度环 PID</div>
-            <div class="form-grid form-grid-pid">
-              <label>KP<input id="param-kp" type="number" step="0.000001"></label>
-              <label>KI<input id="param-ki" type="number" step="0.000001"></label>
-              <label>KD<input id="param-kd" type="number" step="0.000001"></label>
-              <label>抗饱和 KAW<input id="param-kaw" type="number" step="0.000001"></label>
-              <label>微分滤波 α<input id="param-alpha" type="number" step="0.000001" min="0" max="1"></label>
-            </div>
-
-            <div class="config-group-title">编码器与限幅</div>
-            <div class="form-grid">
-              <label>编码器计数 / 每转<input id="param-cpr" type="number" step="1" min="1"></label>
-              <label>减速比<input id="param-gear" type="number" step="0.000001" min="0.000001"></label>
-              <label>最大速度 (rpm)<input id="param-max-speed" type="number" step="1" min="1"></label>
-              <label>最大占空比 (%)<input id="param-max-duty" type="number" step="0.1" min="0.1" max="100"></label>
-              <label>加速度斜坡 (rpm/s)<input id="param-accel" type="number" step="1" min="1"></label>
-            </div>
-            <div class="binary-fields">
-              <label><input id="param-invert-motor" type="checkbox">电机方向反相</label>
-              <label><input id="param-invert-encoder" type="checkbox">编码器方向反相</label>
-            </div>
-          </section>
-
-          <aside class="global-params-panel">
-            <div class="section-kicker">GLOBAL</div>
-            <h2>全局保护</h2>
-            <label class="field-block">通信超时 (ms)<input id="param-timeout" type="number" min="50" max="10000" step="10"></label>
-            <label class="field-block">低速测速窗口 (ms)<input id="param-window" type="number" min="10" max="1000" step="10"></label>
-            <dl class="parameter-meta">
-              <div><dt>格式版本</dt><dd id="param-version">--</dd></div>
-              <div><dt>存储序号</dt><dd id="param-sequence">--</dd></div>
-              <div><dt>记录 CRC</dt><dd id="param-crc">--</dd></div>
-            </dl>
-          </aside>
-
-          <section class="motor-autotune-panel">
-            <div class="panel-title-row calibration-heading">
-              <div>
-                <div class="panel-eyebrow">CLOSED-LOOP AUTOTUNE</div>
-                <h2>电机速度环自动整定</h2>
-              </div>
-              <span class="calibration-state" id="autotune-state" data-state="idle">等待开始</span>
-            </div>
-
-            <div class="autotune-layout">
-              <div class="autotune-setup">
-                <dl class="calibration-target">
-                  <div><dt>当前通道</dt><dd id="autotune-motor">电机 A</dd></div>
-                  <div><dt>开环阶跃</dt><dd>10% · 15% · 20%</dd></div>
-                </dl>
-                <div class="autotune-confirmations">
-                  <label><input id="autotune-confirm-lifted" type="checkbox" disabled>轮子已架空，允许所选电机短时转动</label>
-                  <label><input id="autotune-confirm-scale" type="checkbox" disabled>当前编码器计数与减速比已经校准</label>
-                </div>
-                <fieldset class="direction-choice" id="autotune-direction-choice" disabled>
-                  <legend>机械方向</legend>
-                  <label><input type="radio" name="autotune-direction" value="forward">正命令已确认为机械前进</label>
-                  <label><input type="radio" name="autotune-direction" value="unknown">机械方向未知，仅统一反馈符号</label>
-                </fieldset>
-                <div class="calibration-actions">
-                  <button class="button button-dark" id="autotune-start-button" type="button" disabled>开始自动整定</button>
-                  <button class="button button-danger" id="autotune-stop-button" type="button" disabled>立即停止</button>
-                  <button class="button button-secondary" id="autotune-export-button" type="button" disabled>导出报告</button>
-                </div>
-              </div>
-
-              <div class="autotune-process">
-                <div class="autotune-progress-row">
-                  <progress id="autotune-progress" max="100" value="0">0%</progress>
-                  <strong id="autotune-progress-label">0%</strong>
-                </div>
-                <ol class="autotune-stages">
-                  <li data-autotune-stage="prepare" data-state="pending"><span>01</span><strong>备份与停机</strong><em>等待</em></li>
-                  <li data-autotune-stage="open" data-state="pending"><span>02</span><strong>开环阶跃</strong><em>等待</em></li>
-                  <li data-autotune-stage="identify" data-state="pending"><span>03</span><strong>模型与 PI</strong><em>等待</em></li>
-                  <li data-autotune-stage="closed" data-state="pending"><span>04</span><strong>闭环验收</strong><em>等待</em></li>
-                  <li data-autotune-stage="save" data-state="pending"><span>05</span><strong>保存 Flash</strong><em>等待</em></li>
-                </ol>
-              </div>
-
-              <dl class="calibration-metrics autotune-metrics">
-                <div><dt>电机增益</dt><dd id="autotune-gain">--</dd></div>
-                <div><dt>估算死区</dt><dd id="autotune-deadzone">--</dd></div>
-                <div><dt>时间常数</dt><dd id="autotune-tau">--</dd></div>
-                <div><dt>延迟</dt><dd id="autotune-delay">--</dd></div>
-                <div><dt>KP / KI</dt><dd id="autotune-pi">--</dd></div>
-                <div><dt>闭环目标</dt><dd id="autotune-target">--</dd></div>
-                <div><dt>平均绝对误差</dt><dd id="autotune-mae">--</dd></div>
-                <div><dt>最大超调</dt><dd id="autotune-overshoot">--</dd></div>
-                <div><dt>反馈方向</dt><dd id="autotune-feedback">--</dd></div>
-              </dl>
-            </div>
-          </section>
-        </div>
-      </section>
-
-      <section class="view-panel" id="update-view" data-panel="update" hidden>
-        <header class="update-header">
-          <div>
-            <div class="section-kicker">FIRMWARE UPDATE</div>
-            <h2>应用固件升级</h2>
-          </div>
-          <div class="update-state" id="update-state">请选择应用升级包</div>
-        </header>
-
-        <div class="update-layout">
-          <section class="update-file-panel">
-            <div class="panel-title-row">
-              <div>
-                <div class="panel-eyebrow">LOCAL IMAGE</div>
-                <h2>固件文件</h2>
-              </div>
-              <button class="button button-secondary" id="select-update-file-button" type="button">选择 .bin</button>
-              <input id="update-file-input" type="file" accept=".bin,application/octet-stream" hidden>
-            </div>
-            <div class="update-file-name" id="update-file-name">未选择文件</div>
-            <div class="update-file-size" id="update-file-size">--</div>
-            <dl class="update-metadata">
-              <div><dt>目标版本</dt><dd id="update-image-version">--</dd></div>
-              <div><dt>控制板 ID</dt><dd id="update-board-id">--</dd></div>
-              <div><dt>文件长度</dt><dd id="update-image-length">--</dd></div>
-              <div><dt>代码 CRC</dt><dd id="update-image-crc">--</dd></div>
-            </dl>
-          </section>
-
-          <section class="update-process-panel">
-            <div class="panel-eyebrow">PROGRAM FLOW</div>
-            <h2>写入进度</h2>
-            <ol class="update-stages">
-              <li class="update-stage" id="update-stage-file" data-state="pending">
-                <span class="stage-index">01</span><strong>本地镜像校验</strong><span data-role="status">等待</span>
-              </li>
-              <li class="update-stage" id="update-stage-bsl" data-state="pending">
-                <span class="stage-index">02</span><strong>连接二级 BSL</strong><span data-role="status">等待</span>
-              </li>
-              <li class="update-stage" id="update-stage-program" data-state="pending">
-                <span class="stage-index">03</span><strong>写入与目标 CRC</strong><span data-role="status">等待</span>
-              </li>
-              <li class="update-stage" id="update-stage-restart" data-state="pending">
-                <span class="stage-index">04</span><strong>重启版本确认</strong><span data-role="status">等待</span>
-              </li>
-            </ol>
-            <div class="update-progress-row">
-              <progress id="update-progress" max="100" value="0">0%</progress>
-              <strong id="update-progress-label">0%</strong>
-            </div>
-          </section>
-
-          <aside class="update-action-panel">
-            <div class="panel-eyebrow">TARGET</div>
-            <h2>升级目标</h2>
-            <dl class="update-target-meta">
-              <div><dt>当前固件</dt><dd id="update-current-version">未连接</dd></div>
-              <div><dt>传输接口</dt><dd>UART · 115200</dd></div>
-              <div><dt>写入分区</dt><dd>0x3000 - 0x1F7FF</dd></div>
-            </dl>
-            <label class="update-confirmation">
-              <input id="update-confirm" type="checkbox" disabled>
-              <span>确认四路电机已停机，升级期间保持供电</span>
-            </label>
-            <button class="button button-dark button-block" id="update-start-button" type="button" disabled>开始固件升级</button>
-            <button class="button button-secondary button-block" id="update-recovery-button" type="button" disabled>恢复模式写入</button>
-          </aside>
-        </div>
-      </section>
+      <footer class="selector-footer">
+        <span>Chrome / Edge</span><span>Web Serial</span><span>本地串口通信</span><span>固件不会上传服务器</span>
+      </footer>
     </main>
-
-    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-    <script type="module" src="./app.mjs?v=20260725-2"></script>
   </body>
 </html>

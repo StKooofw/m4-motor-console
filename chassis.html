@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#eef1f3">
+    <title>灰度循迹小车底盘</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="./chassis.css?v=20260726-1">
+  </head>
+  <body>
+    <header class="app-header">
+      <a class="brand" href="./index.html" aria-label="返回产品选择">
+        <span class="brand-mark">GC</span>
+        <span><strong>GRAY CHASSIS</strong><small>双轮差速 · CHAS</small></span>
+      </a>
+      <div class="header-controls">
+        <div class="connection-state" id="connection-state" data-state="offline">
+          <span class="status-dot"></span><span id="connection-label">未连接</span>
+        </div>
+        <button class="button secondary" id="connect-button" type="button">连接底盘</button>
+        <button class="button secondary" id="clear-estop-button" type="button" disabled>解除急停</button>
+        <button class="button danger" id="estop-button" type="button" disabled>急停</button>
+      </div>
+    </header>
+
+    <main class="app-shell">
+      <div class="support-banner" id="support-banner" hidden>当前浏览器不能使用 Web Serial。</div>
+
+      <header class="workspace-header">
+        <div>
+          <span class="kicker">MSPM0G3507 · UART0 115200</span>
+          <h1>灰度循迹小车底盘</h1>
+        </div>
+        <dl class="identity-strip">
+          <div><dt>设备</dt><dd id="device-name">等待连接</dd></div>
+          <div><dt>固件</dt><dd id="firmware-version">--</dd></div>
+          <div><dt>运行时间</dt><dd id="uptime-value">--</dd></div>
+          <div><dt>状态</dt><dd id="state-value">离线</dd></div>
+        </dl>
+      </header>
+
+      <nav class="tabs" role="tablist" aria-label="底盘工作区">
+        <button class="tab is-active" type="button" data-view="monitor" role="tab" aria-selected="true">实时监控</button>
+        <button class="tab" type="button" data-view="parameters" role="tab" aria-selected="false">三级控制参数</button>
+        <button class="tab" type="button" data-view="calibration" role="tab" aria-selected="false">标定</button>
+        <button class="tab" type="button" data-view="update" role="tab" aria-selected="false">底盘固件升级</button>
+      </nav>
+
+      <section class="view is-active" data-panel="monitor">
+        <div class="metric-band">
+          <div><span>灰度偏差</span><strong id="line-error">-- mm</strong></div>
+          <div><span>航向角</span><strong id="yaw-value">--°</strong></div>
+          <div><span>角度误差</span><strong id="angle-error">--°</strong></div>
+          <div><span>Z 轴角速度</span><strong id="gyro-value">-- °/s</strong></div>
+          <div><span>差速输出</span><strong id="steer-value">-- mm/s</strong></div>
+        </div>
+
+        <div class="monitor-grid">
+          <section class="panel sensor-panel">
+            <header class="panel-header">
+              <div><span class="panel-kicker">GRAY16</span><h2>16 路灰度阵列</h2></div>
+              <div class="inline-status"><span id="line-state">等待采样</span><strong id="gray-bits">0x----</strong></div>
+            </header>
+            <div class="sensor-track" id="sensor-track" aria-label="16 路灰度状态"></div>
+            <div class="line-scale"><span>-60 mm</span><i id="line-cursor"></i><span>+60 mm</span></div>
+            <div class="chart-grid">
+              <div><span>灰度偏差</span><canvas id="line-chart" width="720" height="160"></canvas></div>
+              <div><span>航向 / 目标</span><canvas id="yaw-chart" width="720" height="160"></canvas></div>
+            </div>
+          </section>
+
+          <aside class="panel imu-panel">
+            <header class="panel-header">
+              <div><span class="panel-kicker">ICM45686</span><h2>航向状态</h2></div>
+              <span class="badge" id="imu-state">未标定</span>
+            </header>
+            <div class="yaw-dial" aria-label="航向角表盘">
+              <div class="yaw-needle" id="yaw-needle"></div>
+              <span>N</span><strong id="yaw-dial-value">0.0°</strong>
+            </div>
+            <dl class="value-list">
+              <div><dt>目标航向</dt><dd id="yaw-reference">--°</dd></div>
+              <div><dt>零偏</dt><dd id="imu-bias">-- °/s</dd></div>
+              <div><dt>响应峰值</dt><dd id="peak-gyro">-- °/s</dd></div>
+              <div><dt>响应时间</dt><dd id="response-time">-- ms</dd></div>
+            </dl>
+            <div class="button-row">
+              <button class="button secondary" id="zero-yaw-button" type="button" disabled>航向清零</button>
+              <button class="button secondary" id="gyro-cal-button" type="button" disabled>静态标定</button>
+            </div>
+          </aside>
+        </div>
+
+        <section class="panel wheel-panel">
+          <header class="panel-header">
+            <div><span class="panel-kicker">DUAL WHEEL</span><h2>轮上控制</h2></div>
+            <span class="badge" id="control-mode">已停止</span>
+          </header>
+          <div class="wheel-control-grid">
+            <label><span id="left-wheel-label">左轮 A</span><input id="left-wheel-target" type="number" min="-120" max="120" step="1" value="0"><em>rpm</em></label>
+            <label><span id="right-wheel-label">右轮 C</span><input id="right-wheel-target" type="number" min="-120" max="120" step="1" value="0"><em>rpm</em></label>
+            <button class="button primary" id="send-wheels-button" type="button" disabled>发送双轮目标</button>
+            <button class="button secondary" id="stop-wheels-button" type="button" disabled>双轮停止</button>
+            <button class="button primary green" id="start-tracking-button" type="button" disabled>启动循迹</button>
+            <button class="button secondary" id="stop-tracking-button" type="button" disabled>停止循迹</button>
+          </div>
+          <div class="wheel-status-grid">
+            <article><span id="left-wheel-status-label">左轮 A 目标</span><strong id="left-wheel-live">-- rpm</strong><small>正值朝前</small></article>
+            <article><span id="right-wheel-status-label">右轮 C 目标</span><strong id="right-wheel-live">-- rpm</strong><small>正值朝前</small></article>
+            <article><span>传感器故障</span><strong id="sensor-failures">--</strong><small>累计</small></article>
+            <article><span>陀螺仪故障</span><strong id="imu-failures">--</strong><small>累计</small></article>
+            <article><span>电机链路故障</span><strong id="motor-failures">--</strong><small>累计</small></article>
+          </div>
+        </section>
+      </section>
+
+      <section class="view" data-panel="parameters">
+        <header class="section-heading">
+          <div><span class="kicker">CASCADED CONTROL</span><h2>三串 PID 参数</h2></div>
+          <div class="button-row">
+            <button class="button secondary" id="read-params-button" type="button" disabled>读取</button>
+            <button class="button primary" id="apply-params-button" type="button" disabled>写入 RAM</button>
+            <button class="button primary green" id="save-params-button" type="button" disabled>保存 Flash</button>
+          </div>
+        </header>
+        <form class="parameter-layout" id="parameter-form">
+          <fieldset class="drive-mapping">
+            <legend>双轮通道映射</legend>
+            <div class="mapping-controls">
+              <label><span>左轮通道</span><select name="leftMotorChannel" aria-label="左轮电机通道">
+                <option value="0">A</option><option value="1">B</option><option value="2">C</option><option value="3">D</option>
+              </select></label>
+              <label><span>右轮通道</span><select name="rightMotorChannel" aria-label="右轮电机通道">
+                <option value="0">A</option><option value="1">B</option><option value="2" selected>C</option><option value="3">D</option>
+              </select></label>
+              <p>仅启用所选两路，其余通道始终保持零速和禁用。更改映射前必须停止双轮。</p>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>灰度位置外环</legend>
+            <label><span>Kp</span><input name="lineKp" type="number" min="0" max="20" step="0.0001"></label>
+            <label><span>Ki</span><input name="lineKi" type="number" min="0" max="20" step="0.0001"></label>
+            <label><span>Kd</span><input name="lineKd" type="number" min="0" max="20" step="0.0001"></label>
+          </fieldset>
+          <fieldset>
+            <legend>航向角度中环</legend>
+            <label><span>Kp</span><input name="angleKp" type="number" min="0" max="100" step="0.001"></label>
+            <label><span>Ki</span><input name="angleKi" type="number" min="0" max="100" step="0.001"></label>
+            <label><span>Kd</span><input name="angleKd" type="number" min="0" max="100" step="0.001"></label>
+          </fieldset>
+          <fieldset>
+            <legend>底盘速度规划</legend>
+            <label><span>基础速度</span><input name="baseSpeedMmS" type="number" min="0" max="1000" step="1"><em>mm/s</em></label>
+            <label><span>最大速度</span><input name="maxSpeedMmS" type="number" min="10" max="1500" step="1"><em>mm/s</em></label>
+            <label><span>最大差速</span><input name="maxSteerMmS" type="number" min="0" max="1000" step="1"><em>mm/s</em></label>
+            <label><span>通信超时</span><input name="commandTimeoutMs" type="number" min="200" max="5000" step="50"><em>ms</em></label>
+          </fieldset>
+          <fieldset class="inner-loop">
+            <legend>轮速内环</legend>
+            <p>所选两路电机的速度 PI 由“4 路闭环电机驱动”产品固件独立管理。</p>
+            <a href="./motor.html">打开电机驱动工作台 →</a>
+          </fieldset>
+        </form>
+      </section>
+
+      <section class="view" data-panel="calibration">
+        <div class="calibration-layout">
+          <section class="panel">
+            <header class="panel-header"><div><span class="panel-kicker">IMU ZERO</span><h2>陀螺仪静态零偏</h2></div><span class="badge" id="gyro-cal-state">待机</span></header>
+            <div class="calibration-value"><span>当前零偏</span><strong id="cal-bias-value">-- °/s</strong></div>
+            <label class="confirm-row"><input id="gyro-still-confirm" type="checkbox"><span>车体静止，陀螺仪已固定</span></label>
+            <button class="button primary button-block" id="start-gyro-cal-button" type="button" disabled>开始静态标定</button>
+          </section>
+
+          <section class="panel">
+            <header class="panel-header"><div><span class="panel-kicker">ANGLE LOOP</span><h2>角度环自动标定</h2></div><span class="badge" id="angle-cal-state">待机</span></header>
+            <div class="candidate-grid">
+              <div><span>Kp 候选</span><strong id="candidate-kp">--</strong></div>
+              <div><span>Ki 候选</span><strong id="candidate-ki">--</strong></div>
+              <div><span>Kd 候选</span><strong id="candidate-kd">--</strong></div>
+            </div>
+            <progress id="calibration-progress" max="100" value="0"></progress>
+            <label class="confirm-row"><input id="imu-mounted-confirm" type="checkbox"><span>ICM45686 已牢固安装</span></label>
+            <label class="confirm-row"><input id="ground-confirm" type="checkbox"><span>两轮落地，车体周围区域空旷</span></label>
+            <label class="confirm-row"><input id="direction-confirm" type="checkbox"><span id="direction-confirm-label">左轮 A、右轮 C 的正值均朝前</span></label>
+            <div class="button-row">
+              <button class="button primary" id="start-angle-cal-button" type="button" disabled>开始角度环标定</button>
+              <button class="button danger" id="abort-cal-button" type="button" disabled>立即中止</button>
+              <button class="button secondary" id="apply-candidate-button" type="button" disabled>应用候选参数</button>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" data-panel="update">
+        <div class="update-layout">
+          <section class="panel">
+            <header class="panel-header"><div><span class="panel-kicker">CHAS IMAGE</span><h2>底盘应用升级包</h2></div><span class="badge" id="update-file-state">未选择</span></header>
+            <input id="update-file-input" type="file" accept=".bin,application/octet-stream" hidden>
+            <button class="file-drop" id="select-update-file-button" type="button">
+              <strong id="update-file-name">选择 application_update.bin</strong>
+              <span id="update-file-size">仅接受 CHAS 板型镜像</span>
+            </button>
+            <dl class="value-list update-values">
+              <div><dt>镜像版本</dt><dd id="update-image-version">--</dd></div>
+              <div><dt>板型 ID</dt><dd id="update-board-id">--</dd></div>
+              <div><dt>镜像长度</dt><dd id="update-image-length">--</dd></div>
+              <div><dt>镜像 CRC</dt><dd id="update-image-crc">--</dd></div>
+            </dl>
+          </section>
+          <section class="panel">
+            <header class="panel-header"><div><span class="panel-kicker">UART BSL</span><h2>写入状态</h2></div><span class="badge" id="update-state">等待镜像</span></header>
+            <ol class="update-stages">
+              <li id="stage-file">本地镜像校验</li>
+              <li id="stage-bsl">进入底盘二级 BSL</li>
+              <li id="stage-program">应用分区写入与 CRC</li>
+              <li id="stage-restart">重启并核对 CHAS 版本</li>
+            </ol>
+            <progress id="update-progress" max="100" value="0"></progress>
+            <label class="confirm-row"><input id="update-confirm" type="checkbox"><span>双轮已停止并保持稳定供电</span></label>
+            <div class="button-row">
+              <button class="button primary green" id="update-start-button" type="button" disabled>开始底盘升级</button>
+              <button class="button secondary" id="update-recovery-button" type="button" disabled>恢复模式写入</button>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+    <script type="module" src="./chassis_app.mjs?v=20260726-1"></script>
+  </body>
+</html>
