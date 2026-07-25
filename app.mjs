@@ -18,7 +18,6 @@ import { sendMotorTarget } from "./motor_command.mjs";
 import { formatQ16ForInput } from "./parameter_format.mjs";
 import { resolveMotorEndpoint } from "./chassis_bridge.mjs";
 import {
-  isSerialPortAlreadyOpen,
   registerSerialReleaseHandler,
   requestSerialHandoff,
   serialConnectionMessage,
@@ -321,12 +320,7 @@ class SerialTransport {
   }
 
   async open() {
-    try {
-      await this.port.open({ baudRate: 115200, bufferSize: 4096 });
-    } catch (error) {
-      if (!isSerialPortAlreadyOpen(error) ||
-          !this.port.readable || !this.port.writable) throw error;
-    }
+    await this.port.open({ baudRate: 115200, bufferSize: 4096 });
     await this.attach();
   }
 
@@ -1040,7 +1034,7 @@ async function endSession(safeStop = true) {
   elements.estop_button.textContent = "全部急停";
 }
 
-async function connectHardware(port, automatic = false) {
+async function connectHardware(port) {
   if (connectionBusy) return;
   connectionBusy = true;
   await endSession(false);
@@ -1048,13 +1042,11 @@ async function connectHardware(port, automatic = false) {
   elements.connect_button.disabled = true;
   let hardware = null;
   try {
-    if (!automatic) {
-      const handoff = await requestSerialHandoff();
-      if (!handoff.released) {
-        throw new ProtocolError("另一个上位机页面正在执行升级或整定，暂时不能释放串口");
-      }
-      if (handoff.delayMs > 0) await sleep(handoff.delayMs);
+    const handoff = await requestSerialHandoff();
+    if (!handoff.released) {
+      throw new ProtocolError("另一个上位机页面正在执行升级或整定，暂时不能释放串口");
     }
+    if (handoff.delayMs > 0) await sleep(handoff.delayMs);
     hardware = await HardwareSession.create(port);
     hardware.transport.onUnexpectedClose = () => {
       if (session === hardware) {
@@ -1063,7 +1055,7 @@ async function connectHardware(port, automatic = false) {
       }
     };
     await activateSession(hardware);
-    toast(automatic ? "已自动连接授权设备" : "设备识别成功");
+    toast("设备识别成功");
   } catch (error) {
     if (hardware) await hardware.close();
     else {
@@ -1772,14 +1764,6 @@ function bindEvents() {
   });
 }
 
-async function autoConnect() {
-  if (!("serial" in navigator)) return;
-  try {
-    const ports = await navigator.serial.getPorts();
-    if (ports.length === 1 && !session) await connectHardware(ports[0], true);
-  } catch { /* explicit connection remains available */ }
-}
-
 function initialize() {
   createMotorSelectors();
   createStatusRows();
@@ -1800,7 +1784,6 @@ function initialize() {
     if (session) await endSession(true);
     return { released: true, delayMs };
   });
-  if (supported) autoConnect();
 }
 
 initialize();

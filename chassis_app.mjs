@@ -12,7 +12,6 @@ import {
   makeIntPayload,
 } from "./chassis_protocol.mjs";
 import {
-  isSerialPortAlreadyOpen,
   registerSerialReleaseHandler,
   requestSerialHandoff,
   serialConnectionMessage,
@@ -94,12 +93,7 @@ class SerialTransport {
     this.onUnexpectedClose = null;
   }
   async open() {
-    try {
-      await this.port.open({ baudRate: 115200, bufferSize: 4096 });
-    } catch (error) {
-      if (!isSerialPortAlreadyOpen(error) ||
-          !this.port.readable || !this.port.writable) throw error;
-    }
+    await this.port.open({ baudRate: 115200, bufferSize: 4096 });
     await this.attach();
   }
   async attach() {
@@ -529,13 +523,13 @@ async function endSession(safeStop = true) {
   clearDisplay();
 }
 
-async function connectPort(port, alreadyOpen = false, automatic = false) {
+async function connectPort(port, alreadyOpen = false) {
   if (connectionBusy) return;
   connectionBusy = true;
   setConnection("busy", "识别 CHAS");
   elements.connect_button.disabled = true;
   try {
-    if (!alreadyOpen && !automatic) {
+    if (!alreadyOpen) {
       const handoff = await requestSerialHandoff();
       if (!handoff.released) {
         throw new ProtocolError("另一个上位机页面正在执行升级或整定，暂时不能释放串口");
@@ -742,15 +736,6 @@ function bindEvents() {
   elements.update_recovery_button.addEventListener("click", () => performUpdate(true));
 }
 
-async function autoConnect() {
-  try {
-    const ports = await navigator.serial.getPorts();
-    if (ports.length === 1 && !activeSession) {
-      await connectPort(ports[0], false, true);
-    }
-  } catch { /* explicit connection remains available */ }
-}
-
 function initialize() {
   createSensors();
   bindEvents();
@@ -766,7 +751,6 @@ function initialize() {
     if (activeSession) await endSession(true);
     return true;
   });
-  if (supported) void autoConnect();
 }
 
 initialize();
