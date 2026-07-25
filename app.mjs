@@ -16,6 +16,7 @@ import {
 } from "./firmware_update.mjs";
 import { sendMotorTarget } from "./motor_command.mjs";
 import { formatQ16ForInput } from "./parameter_format.mjs";
+import { resolveMotorEndpoint } from "./chassis_bridge.mjs";
 import {
   AUTOTUNE_DUTIES_PERMILLE,
   AUTOTUNE_KEEPALIVE_PERIOD_MS,
@@ -533,10 +534,11 @@ class RawSerialTransport {
 }
 
 class HardwareSession {
-  constructor(transport, version) {
+  constructor(transport, version, chassisVersion = null) {
     this.kind = "hardware";
     this.transport = transport;
     this.version = version;
+    this.chassisVersion = chassisVersion;
   }
 
   static async create(port, alreadyOpen = false) {
@@ -544,10 +546,22 @@ class HardwareSession {
     try {
       if (alreadyOpen) await transport.attach();
       else await transport.open();
-      const payload = await transport.request(COMMAND.PING);
-      if (payload.length !== 4) throw new ProtocolError("PING 响应长度错误");
-      const version = new DataView(payload.buffer, payload.byteOffset, 4).getUint32(0, true);
-      return new HardwareSession(transport, version);
+      const endpoint = await resolveMotorEndpoint(
+        transport,
+        COMMAND.PING,
+        async () => {
+          const attached = new SerialTransport(port);
+          await attached.attach();
+          return attached;
+        },
+        sleep,
+      );
+      transport = endpoint.transport;
+      return new HardwareSession(
+        transport,
+        endpoint.version,
+        endpoint.chassisVersion,
+      );
     } catch (error) {
       if (alreadyOpen) await transport.detach();
       else await transport.close();
@@ -557,10 +571,14 @@ class HardwareSession {
 
   get adapterLabel() {
     const info = this.transport.port.getInfo();
-    if (info.usbVendorId == null) return "已授权系统串口";
-    const vendor = info.usbVendorId.toString(16).toUpperCase().padStart(4, "0");
-    const product = info.usbProductId?.toString(16).toUpperCase().padStart(4, "0") || "----";
-    return `USB VID ${vendor} · PID ${product}`;
+    const adapter = info.usbVendorId == null
+      ? "已授权系统串口"
+      : `USB VID ${info.usbVendorId.toString(16).toUpperCase().padStart(4, "0")} · PID ${
+        info.usbProductId?.toString(16).toUpperCase().padStart(4, "0") || "----"
+      }`;
+    return this.chassisVersion == null
+      ? adapter
+      : `${adapter} · 经底盘 ${firmwareLabel(this.chassisVersion)} 透传`;
   }
 
   async getStatus() {

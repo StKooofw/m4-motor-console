@@ -14,6 +14,7 @@ export const PARAM_MAGIC = 0x50534843;
 export const PARAM_VERSION = 2;
 export const PARAM_SIZE = 64;
 export const ANGLE_AUTOTUNE_SAFETY_TOKEN = 0x45464153;
+export const CAP_MOTOR_BRIDGE = 1 << 5;
 
 export const COMMAND = Object.freeze({
   PING: 0x01,
@@ -30,6 +31,7 @@ export const COMMAND = Object.freeze({
   SET_PARAMS: 0x21,
   SAVE_PARAMS: 0x22,
   ENTER_UPDATE: 0x30,
+  ENTER_MOTOR_BRIDGE: 0x31,
   ACK: 0x7e,
   NACK: 0x7f,
 });
