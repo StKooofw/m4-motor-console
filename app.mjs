@@ -548,12 +548,12 @@ class HardwareSession {
   }
 
   static async create(port, alreadyOpen = false) {
-    const transport = new SerialTransport(port);
+    const initialTransport = new SerialTransport(port);
     try {
-      if (alreadyOpen) await transport.attach();
-      else await transport.open();
+      if (alreadyOpen) await initialTransport.attach();
+      else await initialTransport.open();
       const endpoint = await resolveMotorEndpoint(
-        transport,
+        initialTransport,
         COMMAND.PING,
         async () => {
           const attached = new SerialTransport(port);
@@ -562,15 +562,14 @@ class HardwareSession {
         },
         sleep,
       );
-      transport = endpoint.transport;
       return new HardwareSession(
-        transport,
+        endpoint.transport,
         endpoint.version,
         endpoint.chassisVersion,
       );
     } catch (error) {
-      if (alreadyOpen) await transport.detach();
-      else await transport.close();
+      if (alreadyOpen) await initialTransport.detach();
+      else await initialTransport.close();
       throw error;
     }
   }
