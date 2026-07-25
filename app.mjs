@@ -1462,7 +1462,6 @@ async function startMotorAutotune() {
     try {
       currentParams = await activeSession.getParams();
     } catch (readbackError) {
-      currentParams = finalParams;
       autotuneReport.postSaveReadbackError = readbackError.message;
     }
     autotuneReport.paramsAfter = clone(currentParams);
