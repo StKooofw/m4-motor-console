@@ -18,6 +18,12 @@ import { sendMotorTarget } from "./motor_command.mjs";
 import { formatQ16ForInput } from "./parameter_format.mjs";
 import { resolveMotorEndpoint } from "./chassis_bridge.mjs";
 import {
+  isSerialPortAlreadyOpen,
+  registerSerialReleaseHandler,
+  requestSerialHandoff,
+  serialConnectionMessage,
+} from "./serial_handoff.mjs";
+import {
   AUTOTUNE_DUTIES_PERMILLE,
   AUTOTUNE_KEEPALIVE_PERIOD_MS,
   AUTOTUNE_SAMPLE_PERIOD_MS,
@@ -84,6 +90,7 @@ let updateInProgress = false;
 let autotuneBusy = false;
 let autotuneAbortRequested = false;
 let autotuneReport = null;
+let connectionBusy = false;
 
 function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -314,7 +321,12 @@ class SerialTransport {
   }
 
   async open() {
-    await this.port.open({ baudRate: 115200, bufferSize: 4096 });
+    try {
+      await this.port.open({ baudRate: 115200, bufferSize: 4096 });
+    } catch (error) {
+      if (!isSerialPortAlreadyOpen(error) ||
+          !this.port.readable || !this.port.writable) throw error;
+    }
     await this.attach();
   }
 
@@ -1029,11 +1041,20 @@ async function endSession(safeStop = true) {
 }
 
 async function connectHardware(port, automatic = false) {
+  if (connectionBusy) return;
+  connectionBusy = true;
   await endSession(false);
   setConnectionState("busy", "识别设备");
   elements.connect_button.disabled = true;
   let hardware = null;
   try {
+    if (!automatic) {
+      const handoff = await requestSerialHandoff();
+      if (!handoff.released) {
+        throw new ProtocolError("另一个上位机页面正在执行升级或整定，暂时不能释放串口");
+      }
+      if (handoff.delayMs > 0) await sleep(handoff.delayMs);
+    }
     hardware = await HardwareSession.create(port);
     hardware.transport.onUnexpectedClose = () => {
       if (session === hardware) {
@@ -1049,10 +1070,11 @@ async function connectHardware(port, automatic = false) {
       try { await port.close(); } catch { /* not open */ }
     }
     setConnectionState("fault", "识别失败");
-    toast(`没有识别到电机固件：${error.message}`, "error");
+    toast(`没有识别到电机固件：${serialConnectionMessage(error)}`, "error");
     await sleep(500);
     if (!session) setConnectionState("offline", "未连接");
   } finally {
+    connectionBusy = false;
     elements.connect_button.disabled = updateInProgress;
   }
 }
@@ -1772,6 +1794,12 @@ function initialize() {
   if (!supported) elements.connect_button.disabled = true;
   bindEvents();
   renderCharts();
+  registerSerialReleaseHandler(async () => {
+    if (connectionBusy || updateInProgress || autotuneBusy) return false;
+    const delayMs = session?.chassisVersion == null ? 0 : 5200;
+    if (session) await endSession(true);
+    return { released: true, delayMs };
+  });
   if (supported) autoConnect();
 }
 

@@ -12,6 +12,12 @@ import {
   makeIntPayload,
 } from "./chassis_protocol.mjs";
 import {
+  isSerialPortAlreadyOpen,
+  registerSerialReleaseHandler,
+  requestSerialHandoff,
+  serialConnectionMessage,
+} from "./serial_handoff.mjs";
+import {
   BslError,
   TiUartBsl,
   validateApplicationImage,
@@ -50,6 +56,7 @@ let latestTelemetry = null;
 let latestParams = null;
 let pollingToken = 0;
 let updateBusy = false;
+let connectionBusy = false;
 let selectedUpdate = null;
 let toastTimer = null;
 const lineHistory = [];
@@ -87,7 +94,12 @@ class SerialTransport {
     this.onUnexpectedClose = null;
   }
   async open() {
-    await this.port.open({ baudRate: 115200, bufferSize: 4096 });
+    try {
+      await this.port.open({ baudRate: 115200, bufferSize: 4096 });
+    } catch (error) {
+      if (!isSerialPortAlreadyOpen(error) ||
+          !this.port.readable || !this.port.writable) throw error;
+    }
     await this.attach();
   }
   async attach() {
@@ -517,17 +529,30 @@ async function endSession(safeStop = true) {
   clearDisplay();
 }
 
-async function connectPort(port, alreadyOpen = false) {
+async function connectPort(port, alreadyOpen = false, automatic = false) {
+  if (connectionBusy) return;
+  connectionBusy = true;
   setConnection("busy", "识别 CHAS");
   elements.connect_button.disabled = true;
   try {
+    if (!alreadyOpen && !automatic) {
+      const handoff = await requestSerialHandoff();
+      if (!handoff.released) {
+        throw new ProtocolError("另一个上位机页面正在执行升级或整定，暂时不能释放串口");
+      }
+      if (handoff.delayMs > 0) {
+        setConnection("busy", "等待退出电机透传");
+        await sleep(handoff.delayMs);
+      }
+    }
     const session = await ChassisSession.create(port, alreadyOpen);
     await activateSession(session);
     toast("灰度循迹底盘已连接");
   } catch (error) {
     setConnection("fault", "识别失败");
-    toast(`未识别到底盘固件：${error.message}`, "error");
+    toast(`未识别到底盘固件：${serialConnectionMessage(error)}`, "error");
   } finally {
+    connectionBusy = false;
     elements.connect_button.disabled = updateBusy;
   }
 }
@@ -720,7 +745,9 @@ function bindEvents() {
 async function autoConnect() {
   try {
     const ports = await navigator.serial.getPorts();
-    if (ports.length === 1 && !activeSession) await connectPort(ports[0]);
+    if (ports.length === 1 && !activeSession) {
+      await connectPort(ports[0], false, true);
+    }
   } catch { /* explicit connection remains available */ }
 }
 
@@ -734,6 +761,11 @@ function initialize() {
   elements.support_banner.hidden = supported;
   elements.connect_button.disabled = !supported;
   setUpdateControls();
+  registerSerialReleaseHandler(async () => {
+    if (connectionBusy || updateBusy) return false;
+    if (activeSession) await endSession(true);
+    return true;
+  });
   if (supported) void autoConnect();
 }
 
