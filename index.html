@@ -226,17 +226,17 @@
           <section class="parameter-form-panel">
             <div class="config-group-title">速度环 PID</div>
             <div class="form-grid form-grid-pid">
-              <label>KP<input id="param-kp" type="number" step="0.001"></label>
-              <label>KI<input id="param-ki" type="number" step="0.001"></label>
-              <label>KD<input id="param-kd" type="number" step="0.001"></label>
-              <label>抗饱和 KAW<input id="param-kaw" type="number" step="0.001"></label>
-              <label>微分滤波 α<input id="param-alpha" type="number" step="0.01" min="0" max="1"></label>
+              <label>KP<input id="param-kp" type="number" step="0.000001"></label>
+              <label>KI<input id="param-ki" type="number" step="0.000001"></label>
+              <label>KD<input id="param-kd" type="number" step="0.000001"></label>
+              <label>抗饱和 KAW<input id="param-kaw" type="number" step="0.000001"></label>
+              <label>微分滤波 α<input id="param-alpha" type="number" step="0.000001" min="0" max="1"></label>
             </div>
 
             <div class="config-group-title">编码器与限幅</div>
             <div class="form-grid">
               <label>编码器计数 / 每转<input id="param-cpr" type="number" step="1" min="1"></label>
-              <label>减速比<input id="param-gear" type="number" step="0.001" min="0.001"></label>
+              <label>减速比<input id="param-gear" type="number" step="0.000001" min="0.000001"></label>
               <label>最大速度 (rpm)<input id="param-max-speed" type="number" step="1" min="1"></label>
               <label>最大占空比 (%)<input id="param-max-duty" type="number" step="0.1" min="0.1" max="100"></label>
               <label>加速度斜坡 (rpm/s)<input id="param-accel" type="number" step="1" min="1"></label>
@@ -392,6 +392,6 @@
     </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-    <script type="module" src="./app.mjs?v=20260725-1"></script>
+    <script type="module" src="./app.mjs?v=20260725-2"></script>
   </body>
 </html>

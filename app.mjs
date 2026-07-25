@@ -15,6 +15,7 @@ import {
   validateApplicationImage,
 } from "./firmware_update.mjs";
 import { sendMotorTarget } from "./motor_command.mjs";
+import { formatQ16ForInput } from "./parameter_format.mjs";
 import {
   AUTOTUNE_DUTIES_PERMILLE,
   AUTOTUNE_KEEPALIVE_PERIOD_MS,
@@ -1206,13 +1207,13 @@ function captureParameterForm() {
 function populateParameterForm() {
   if (!currentParams) return;
   const motor = currentParams.motors[selectedMotor];
-  elements.param_kp.value = (motor.kpQ16 / 65536).toFixed(4);
-  elements.param_ki.value = (motor.kiQ16 / 65536).toFixed(4);
-  elements.param_kd.value = (motor.kdQ16 / 65536).toFixed(4);
-  elements.param_kaw.value = (motor.kawQ16 / 65536).toFixed(4);
-  elements.param_alpha.value = (motor.derivativeAlphaQ16 / 65536).toFixed(4);
+  elements.param_kp.value = formatQ16ForInput(motor.kpQ16);
+  elements.param_ki.value = formatQ16ForInput(motor.kiQ16);
+  elements.param_kd.value = formatQ16ForInput(motor.kdQ16);
+  elements.param_kaw.value = formatQ16ForInput(motor.kawQ16);
+  elements.param_alpha.value = formatQ16ForInput(motor.derivativeAlphaQ16);
   elements.param_cpr.value = String(motor.encoderCountsPerRev);
-  elements.param_gear.value = (motor.gearRatioQ16 / 65536).toFixed(4);
+  elements.param_gear.value = formatQ16ForInput(motor.gearRatioQ16);
   elements.param_max_speed.value = String(Math.round(motor.maxSpeedMrpm / 1000));
   elements.param_max_duty.value = (motor.maxDutyPermille / 10).toFixed(1);
   elements.param_accel.value = String(motor.accelMrpmPerTick);
@@ -1656,7 +1657,11 @@ function bindEvents() {
         session, selectedMotor, controlMode, elements.target_input.value,
       );
       elements.enable_switch.checked = true;
-      toast(`电机 ${MOTOR_NAMES[selectedMotor]} 目标已发送`);
+      const zeroIntegral = controlMode === "speed" &&
+        currentParams?.motors[selectedMotor]?.kiQ16 === 0;
+      toast(zeroIntegral
+        ? `电机 ${MOTOR_NAMES[selectedMotor]} 目标已发送，但 KI 为 0，持续欠速时占空比不会继续提高`
+        : `电机 ${MOTOR_NAMES[selectedMotor]} 目标已发送`);
     } catch (error) { toast(error.message, "error"); }
   });
 
