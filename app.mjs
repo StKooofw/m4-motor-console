@@ -25,6 +25,7 @@ import {
   chooseAutotuneTargetRpm,
   designAutotunePi,
   makeAutotuneCandidate,
+  makeAutotuneFinalParams,
   makeAutotuneSample,
   summarizeAutotuneStep,
 } from "./motor_autotune.mjs";
@@ -1449,13 +1450,19 @@ async function startMotorAutotune() {
     setAutotuneState("保存参数", "busy");
     setAutotuneStage("save", "active", "写入中");
     await disableAllMotors(activeSession);
+    const finalParams = decodeParams(encodeParams(
+      makeAutotuneFinalParams(candidate, originalParams, motor),
+    ));
+    await activeSession.setParams(finalParams);
+    currentParams = finalParams;
+    autotuneReport.paramsFinal = clone(finalParams);
     await activeSession.saveParams();
     success = true;
     autotuneReport.saved = true;
     try {
       currentParams = await activeSession.getParams();
     } catch (readbackError) {
-      currentParams = candidate;
+      currentParams = finalParams;
       autotuneReport.postSaveReadbackError = readbackError.message;
     }
     autotuneReport.paramsAfter = clone(currentParams);

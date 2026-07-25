@@ -213,3 +213,28 @@ export function makeAutotuneCandidate(params, motorIndex) {
   motor.accelMrpmPerTick = 100;
   return candidate;
 }
+
+/**
+ * 从整定期临时参数生成最终运行参数。
+ *
+ * 20% 占空比和低斜坡仅用于架空辨识及闭环验收，不能覆盖用户原有的运行
+ * 性能上限。PID 和编码器反馈方向等辨识结果保留在 candidate 中。
+ */
+export function makeAutotuneFinalParams(candidate, originalParams, motorIndex) {
+  if (!candidate?.motors?.[motorIndex] || !originalParams?.motors?.[motorIndex]) {
+    throw new MotorAutotuneError("自动整定参数不存在");
+  }
+  const finalParams = typeof structuredClone === "function"
+    ? structuredClone(candidate)
+    : JSON.parse(JSON.stringify(candidate));
+  const originalMotor = originalParams.motors[motorIndex];
+  if (!Number.isInteger(originalMotor.maxDutyPermille) ||
+      originalMotor.maxDutyPermille < 1 || originalMotor.maxDutyPermille > 1000 ||
+      !Number.isInteger(originalMotor.accelMrpmPerTick) ||
+      originalMotor.accelMrpmPerTick < 1 || originalMotor.accelMrpmPerTick > 65535) {
+    throw new MotorAutotuneError("原始运行限幅参数无效");
+  }
+  finalParams.motors[motorIndex].maxDutyPermille = originalMotor.maxDutyPermille;
+  finalParams.motors[motorIndex].accelMrpmPerTick = originalMotor.accelMrpmPerTick;
+  return finalParams;
+}
