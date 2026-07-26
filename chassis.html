@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#eef1f3">
     <title>灰度循迹小车底盘</title>
     <link rel="icon" href="data:,">
-    <link rel="stylesheet" href="./chassis.css?v=20260726-4">
+    <link rel="stylesheet" href="./chassis.css?v=20260726-5">
   </head>
   <body>
     <header class="app-header">
@@ -42,6 +42,7 @@
 
       <nav class="tabs" role="tablist" aria-label="底盘工作区">
         <button class="tab is-active" type="button" data-view="monitor" role="tab" aria-selected="true">实时监控</button>
+        <button class="tab" type="button" data-view="imu" role="tab" aria-selected="false">陀螺仪</button>
         <button class="tab" type="button" data-view="parameters" role="tab" aria-selected="false">三级控制参数</button>
         <button class="tab" type="button" data-view="calibration" role="tab" aria-selected="false">标定</button>
         <button class="tab" type="button" data-view="update" role="tab" aria-selected="false">底盘固件升级</button>
@@ -67,7 +68,6 @@
             <div class="chart-grid">
               <div><span>灰度偏差</span><canvas id="line-chart" width="720" height="160"></canvas></div>
               <div><span>航向 / 目标</span><canvas id="yaw-chart" width="720" height="160"></canvas></div>
-              <div><span>Z 轴角速度 · <b id="gyro-chart-range">±5 °/s</b></span><canvas id="gyro-chart" width="720" height="160" aria-label="Z 轴角速度波形"></canvas></div>
             </div>
           </section>
 
@@ -114,6 +114,74 @@
             <article><span>电机链路故障</span><strong id="motor-failures">--</strong><small>累计</small></article>
           </div>
         </section>
+      </section>
+
+      <section class="view" data-panel="imu">
+        <header class="section-heading imu-section-heading">
+          <div><span class="kicker">ICM45686 · VEHICLE IMU</span><h2>车载陀螺仪</h2></div>
+          <span class="badge" id="imu-console-state">等待连接</span>
+        </header>
+
+        <div class="metric-band imu-metric-band">
+          <div><span>Z 轴角速度</span><strong id="imu-console-gyro">-- °/s</strong></div>
+          <div><span>当前航向</span><strong id="imu-console-yaw">--°</strong></div>
+          <div><span>目标航向</span><strong id="imu-console-reference">--°</strong></div>
+          <div><span>角度误差</span><strong id="imu-console-error">--°</strong></div>
+          <div><span>静态零偏</span><strong id="imu-console-bias">-- °/s</strong></div>
+          <div><span>读取故障</span><strong id="imu-console-failures">--</strong></div>
+        </div>
+
+        <section class="imu-attitude-stage" aria-label="陀螺仪三维姿态">
+          <canvas id="imu-orientation-canvas"></canvas>
+          <div class="imu-stage-title"><span>3D ATTITUDE</span><strong>ICM45686 姿态</strong></div>
+          <div class="imu-stage-readout"><span>YAW</span><strong id="imu-model-yaw">0.0°</strong></div>
+          <div class="imu-axis-legend" aria-label="传感器坐标轴">
+            <span data-axis="x">X 前向</span><span data-axis="y">Y 左向</span><span data-axis="z">Z 向上</span>
+          </div>
+          <p>当前固件输出 Z 轴角速度与融合航向；俯仰和横滚保持中性。</p>
+        </section>
+
+        <div class="imu-workbench">
+          <section class="panel imu-waveform-panel">
+            <header class="panel-header">
+              <div><span class="panel-kicker">LIVE WAVEFORM</span><h2>实时波形</h2></div>
+              <span class="waveform-window">约 12.8 s 窗口</span>
+            </header>
+            <div class="imu-chart-stack">
+              <div>
+                <header><span>Z 轴角速度</span><strong id="gyro-chart-range">±5 °/s</strong></header>
+                <canvas id="gyro-chart" width="960" height="180" aria-label="Z 轴角速度波形"></canvas>
+              </div>
+              <div>
+                <header><span>航向角</span><span class="chart-legend"><i data-series="yaw"></i>当前 <i data-series="reference"></i>目标</span></header>
+                <canvas id="imu-yaw-chart" width="960" height="180" aria-label="当前和目标航向波形"></canvas>
+              </div>
+              <div>
+                <header><span>角度误差</span><strong id="imu-error-chart-range">±5°</strong></header>
+                <canvas id="imu-error-chart" width="960" height="180" aria-label="角度误差波形"></canvas>
+              </div>
+            </div>
+          </section>
+
+          <aside class="panel imu-console-panel">
+            <header class="panel-header">
+              <div><span class="panel-kicker">IMU SERVICE</span><h2>状态与操作</h2></div>
+              <span class="badge" id="imu-console-cal-state">待机</span>
+            </header>
+            <dl class="value-list imu-console-values">
+              <div><dt>标定进度</dt><dd id="imu-console-progress-value">0%</dd></div>
+              <div><dt>响应峰值</dt><dd id="imu-console-peak">-- °/s</dd></div>
+              <div><dt>响应时间</dt><dd id="imu-console-response">-- ms</dd></div>
+              <div><dt>累计读取故障</dt><dd id="imu-console-failure-detail">--</dd></div>
+            </dl>
+            <progress id="imu-console-progress" max="100" value="0"></progress>
+            <div class="imu-console-actions">
+              <button class="button secondary button-block" id="imu-console-zero-button" type="button" disabled>航向清零</button>
+              <label class="confirm-row"><input id="imu-console-still-confirm" type="checkbox"><span>车体静止，陀螺仪已固定</span></label>
+              <button class="button primary button-block" id="imu-console-cal-button" type="button" disabled>开始静态标定</button>
+            </div>
+          </aside>
+        </div>
       </section>
 
       <section class="view" data-panel="parameters">
@@ -230,6 +298,6 @@
     </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-    <script type="module" src="./chassis_app.mjs?v=20260726-4"></script>
+    <script type="module" src="./chassis_app.mjs?v=20260726-5"></script>
   </body>
 </html>

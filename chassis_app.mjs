@@ -21,6 +21,7 @@ import {
   TiUartBsl,
   validateApplicationImage,
 } from "./chassis_firmware_update.mjs";
+import * as THREE from "./vendor/three.module.min.js";
 
 const $ = (id) => document.getElementById(id);
 const elements = Object.fromEntries([
@@ -28,7 +29,7 @@ const elements = Object.fromEntries([
   "support-banner", "device-name", "firmware-version", "uptime-value", "state-value",
   "line-error", "yaw-value", "angle-error", "gyro-value", "steer-value", "line-state",
   "gray-bits", "sensor-track", "line-cursor", "line-chart", "yaw-chart", "gyro-chart",
-  "gyro-chart-range", "imu-state",
+  "gyro-chart-range", "imu-error-chart-range", "imu-yaw-chart", "imu-error-chart", "imu-state",
   "yaw-needle", "yaw-dial-value", "yaw-reference", "imu-bias", "peak-gyro", "response-time",
   "zero-yaw-button", "gyro-cal-button", "control-mode", "left-wheel-target", "right-wheel-target",
   "left-wheel-label", "right-wheel-label", "left-wheel-status-label", "right-wheel-status-label",
@@ -42,7 +43,12 @@ const elements = Object.fromEntries([
   "update-file-name", "update-file-size", "update-file-state", "update-image-version",
   "update-board-id", "update-image-length", "update-image-crc", "update-state", "stage-file",
   "stage-bsl", "stage-program", "stage-restart", "update-progress", "update-confirm",
-  "update-start-button", "update-recovery-button", "toast",
+  "update-start-button", "update-recovery-button", "imu-console-state", "imu-console-gyro",
+  "imu-console-yaw", "imu-console-reference", "imu-console-error", "imu-console-bias",
+  "imu-console-failures", "imu-orientation-canvas", "imu-model-yaw", "imu-console-cal-state",
+  "imu-console-progress", "imu-console-progress-value", "imu-console-peak", "imu-console-response",
+  "imu-console-failure-detail", "imu-console-zero-button", "imu-console-still-confirm",
+  "imu-console-cal-button", "toast",
 ].map((id) => [id.replaceAll("-", "_"), $(id)]));
 
 const stateNames = ["SAFE", "READY", "RUNNING", "FAULT"];
@@ -62,6 +68,13 @@ let toastTimer = null;
 const lineHistory = [];
 const yawHistory = [];
 const gyroHistory = [];
+const angleErrorHistory = [];
+let orientationRenderer = null;
+let orientationScene = null;
+let orientationCamera = null;
+let orientationModel = null;
+let orientationYaw = 0;
+let targetOrientationYaw = 0;
 
 function sleep(ms) { return new Promise((resolve) => window.setTimeout(resolve, ms)); }
 function hex(value, width = 8) { return `0x${(value >>> 0).toString(16).toUpperCase().padStart(width, "0")}`; }
@@ -324,6 +337,105 @@ function createSensors() {
   }
 }
 
+function initializeOrientationView() {
+  const canvas = elements.imu_orientation_canvas;
+  orientationRenderer = new THREE.WebGLRenderer({
+    canvas,
+    antialias: true,
+    powerPreference: "high-performance",
+    preserveDrawingBuffer: true,
+  });
+  orientationRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  orientationRenderer.setClearColor(0x171b1c, 1);
+  orientationRenderer.outputColorSpace = THREE.SRGBColorSpace;
+
+  orientationScene = new THREE.Scene();
+  orientationCamera = new THREE.PerspectiveCamera(34, 1, 0.1, 60);
+  orientationCamera.position.set(6.8, 4.6, 7.6);
+  orientationCamera.lookAt(0, 0, 0);
+
+  orientationScene.add(new THREE.HemisphereLight(0xffffff, 0x273033, 2.4));
+  const keyLight = new THREE.DirectionalLight(0xffffff, 3.2);
+  keyLight.position.set(3, 7, 5);
+  orientationScene.add(keyLight);
+  const fillLight = new THREE.DirectionalLight(0x8fc7ff, 1.2);
+  fillLight.position.set(-5, 2, -4);
+  orientationScene.add(fillLight);
+
+  const grid = new THREE.GridHelper(13, 13, 0x596366, 0x2d3436);
+  grid.position.y = -0.78;
+  orientationScene.add(grid);
+  const headingRing = new THREE.Mesh(
+    new THREE.RingGeometry(3.75, 3.79, 96),
+    new THREE.MeshBasicMaterial({ color: 0x6e787a, side: THREE.DoubleSide }),
+  );
+  headingRing.rotation.x = -Math.PI / 2;
+  headingRing.position.y = -0.76;
+  orientationScene.add(headingRing);
+
+  orientationModel = new THREE.Group();
+  orientationScene.add(orientationModel);
+  const boardMaterial = new THREE.MeshStandardMaterial({ color: 0x246746, roughness: 0.72, metalness: 0.08 });
+  const board = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.2, 2.65), boardMaterial);
+  board.castShadow = true;
+  orientationModel.add(board);
+
+  const chipMaterial = new THREE.MeshStandardMaterial({ color: 0x141718, roughness: 0.48, metalness: 0.22 });
+  const chip = new THREE.Mesh(new THREE.BoxGeometry(1.48, 0.38, 1.48), chipMaterial);
+  chip.position.y = 0.29;
+  orientationModel.add(chip);
+  const marker = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.1, 0.1, 0.025, 24),
+    new THREE.MeshStandardMaterial({ color: 0xc5ccce, roughness: 0.55 }),
+  );
+  marker.position.set(-0.53, 0.5, -0.53);
+  orientationModel.add(marker);
+
+  const pinMaterial = new THREE.MeshStandardMaterial({ color: 0xb7c0c2, roughness: 0.35, metalness: 0.72 });
+  for (let index = -2; index <= 2; index += 1) {
+    for (const side of [-1, 1]) {
+      const sidePin = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.23), pinMaterial);
+      sidePin.position.set(index * 0.27, 0.18, side * 0.83);
+      orientationModel.add(sidePin);
+      const endPin = new THREE.Mesh(new THREE.BoxGeometry(0.23, 0.08, 0.12), pinMaterial);
+      endPin.position.set(side * 0.83, 0.18, index * 0.27);
+      orientationModel.add(endPin);
+    }
+  }
+
+  const connectorMaterial = new THREE.MeshStandardMaterial({ color: 0xe2e5e6, roughness: 0.3, metalness: 0.55 });
+  for (const side of [-1, 1]) {
+    const connector = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.3, 1.35), connectorMaterial);
+    connector.position.set(side * 1.68, 0.23, 0);
+    orientationModel.add(connector);
+  }
+
+  const axisOrigin = new THREE.Vector3(0, 0.64, 0);
+  orientationModel.add(new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), axisOrigin, 2.8, 0xe1484e, 0.28, 0.15));
+  orientationModel.add(new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), axisOrigin, 2.15, 0x47b36b, 0.28, 0.15));
+  orientationModel.add(new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), axisOrigin, 2.05, 0x4387dd, 0.28, 0.15));
+
+  window.requestAnimationFrame(animateOrientationView);
+}
+
+function resizeOrientationView() {
+  if (!orientationRenderer || !orientationCamera) return;
+  const bounds = elements.imu_orientation_canvas.getBoundingClientRect();
+  if (bounds.width < 2 || bounds.height < 2) return;
+  orientationRenderer.setSize(Math.round(bounds.width), Math.round(bounds.height), false);
+  orientationCamera.aspect = bounds.width / bounds.height;
+  orientationCamera.updateProjectionMatrix();
+}
+
+function animateOrientationView() {
+  window.requestAnimationFrame(animateOrientationView);
+  if (!orientationRenderer || !orientationModel || !document.querySelector('[data-panel="imu"].is-active')) return;
+  const delta = ((targetOrientationYaw - orientationYaw + 540) % 360) - 180;
+  orientationYaw += delta * 0.14;
+  orientationModel.rotation.y = THREE.MathUtils.degToRad(-orientationYaw);
+  orientationRenderer.render(orientationScene, orientationCamera);
+}
+
 function setBadge(element, label, state = "") {
   element.textContent = label;
   if (state) element.dataset.state = state; else delete element.dataset.state;
@@ -363,6 +475,17 @@ function renderTelemetry(value) {
   elements.cal_bias_value.textContent = `${value.imuBiasDps.toFixed(4)} °/s`;
   elements.peak_gyro.textContent = `${value.peakGyroDps.toFixed(2)} °/s`;
   elements.response_time.textContent = `${value.responseTimeMs} ms`;
+  elements.imu_console_gyro.textContent = `${value.gyroZDps.toFixed(2)} °/s`;
+  elements.imu_console_yaw.textContent = `${value.yawDeg.toFixed(2)}°`;
+  elements.imu_console_reference.textContent = `${value.yawReferenceDeg.toFixed(2)}°`;
+  elements.imu_console_error.textContent = `${value.angleErrorDeg.toFixed(2)}°`;
+  elements.imu_console_bias.textContent = `${value.imuBiasDps.toFixed(4)} °/s`;
+  elements.imu_console_failures.textContent = String(value.imuFailures);
+  elements.imu_console_peak.textContent = `${value.peakGyroDps.toFixed(2)} °/s`;
+  elements.imu_console_response.textContent = `${value.responseTimeMs} ms`;
+  elements.imu_console_failure_detail.textContent = String(value.imuFailures);
+  elements.imu_model_yaw.textContent = `${value.yawDeg.toFixed(1)}°`;
+  targetOrientationYaw = value.yawDeg;
   setBadge(elements.control_mode, modeNames[value.mode] || `MODE ${value.mode}`, value.state === 3 ? "fault" : value.mode ? "ok" : "");
   elements.left_wheel_live.textContent = `${(value.leftTargetMrpm / 1000).toFixed(1)} rpm`;
   elements.right_wheel_live.textContent = `${(value.rightTargetMrpm / 1000).toFixed(1)} rpm`;
@@ -374,7 +497,11 @@ function renderTelemetry(value) {
   const resultLabel = value.calibrationState >= 6 ? calibrationResults[value.calibrationResult] || calibrationLabel : calibrationLabel;
   setBadge(elements.gyro_cal_state, resultLabel, value.calibrationBusy ? "busy" : value.calibrationResult === 1 ? "ok" : value.calibrationState >= 7 ? "fault" : "");
   setBadge(elements.angle_cal_state, resultLabel, value.calibrationBusy ? "busy" : value.candidateValid ? "ok" : value.calibrationState >= 7 ? "fault" : "");
+  setBadge(elements.imu_console_state, value.imuCalibrated ? "在线 · 已标定" : "在线 · 未标定", value.imuCalibrated ? "ok" : "fault");
+  setBadge(elements.imu_console_cal_state, resultLabel, value.calibrationBusy ? "busy" : value.calibrationResult === 1 ? "ok" : value.calibrationState >= 7 ? "fault" : "");
   elements.calibration_progress.value = value.calibrationProgress;
+  elements.imu_console_progress.value = value.calibrationProgress;
+  elements.imu_console_progress_value.textContent = `${value.calibrationProgress}%`;
   elements.candidate_kp.textContent = value.candidateValid ? value.candidateAngleKp.toFixed(4) : "--";
   elements.candidate_ki.textContent = value.candidateValid ? value.candidateAngleKi.toFixed(4) : "--";
   elements.candidate_kd.textContent = value.candidateValid ? value.candidateAngleKd.toFixed(4) : "--";
@@ -382,19 +509,31 @@ function renderTelemetry(value) {
   lineHistory.push([value.linePositionMm]);
   yawHistory.push([value.yawDeg, value.yawReferenceDeg]);
   gyroHistory.push([value.gyroZDps]);
+  angleErrorHistory.push([value.angleErrorDeg]);
   if (lineHistory.length > 160) lineHistory.shift();
   if (yawHistory.length > 160) yawHistory.shift();
   if (gyroHistory.length > 160) gyroHistory.shift();
-  const gyroRange = symmetricChartRange(gyroHistory, 5, 1000);
-  elements.gyro_chart_range.textContent = `±${gyroRange} °/s`;
-  drawChart(elements.line_chart, lineHistory, ["#246746"], 65);
-  drawChart(elements.yaw_chart, yawHistory, ["#26343d", "#b33a42"], 45);
-  drawChart(elements.gyro_chart, gyroHistory, ["#2f64d6"], gyroRange);
+  if (angleErrorHistory.length > 160) angleErrorHistory.shift();
+  renderCharts();
   updateControlAvailability();
+}
+
+function renderCharts() {
+  const gyroRange = symmetricChartRange(gyroHistory, 5, 1000);
+  const yawRange = symmetricChartRange(yawHistory, 45, 360);
+  const errorRange = symmetricChartRange(angleErrorHistory, 5, 180);
+  elements.gyro_chart_range.textContent = `±${gyroRange} °/s`;
+  elements.imu_error_chart_range.textContent = `±${errorRange}°`;
+  drawChart(elements.line_chart, lineHistory, ["#246746"], 65);
+  drawChart(elements.yaw_chart, yawHistory, ["#26343d", "#b33a42"], yawRange);
+  drawChart(elements.gyro_chart, gyroHistory, ["#2f64d6"], gyroRange);
+  drawChart(elements.imu_yaw_chart, yawHistory, ["#26343d", "#b33a42"], yawRange);
+  drawChart(elements.imu_error_chart, angleErrorHistory, ["#aa3037"], errorRange);
 }
 
 function drawChart(canvas, rows, colors, fixedAbs) {
   const bounds = canvas.getBoundingClientRect();
+  if (bounds.width < 1 || bounds.height < 1) return;
   const ratio = window.devicePixelRatio || 1;
   const width = Math.max(280, Math.round(bounds.width * ratio));
   const height = Math.max(120, Math.round(bounds.height * ratio));
@@ -436,10 +575,18 @@ function clearDisplay() {
   lineHistory.length = 0;
   yawHistory.length = 0;
   gyroHistory.length = 0;
-  elements.gyro_chart_range.textContent = "±5 °/s";
-  drawChart(elements.line_chart, lineHistory, ["#246746"], 65);
-  drawChart(elements.yaw_chart, yawHistory, ["#26343d", "#b33a42"], 45);
-  drawChart(elements.gyro_chart, gyroHistory, ["#2f64d6"], 5);
+  angleErrorHistory.length = 0;
+  for (const key of ["imu_console_gyro", "imu_console_yaw", "imu_console_reference", "imu_console_error",
+    "imu_console_bias", "imu_console_failures", "imu_console_peak", "imu_console_response",
+    "imu_console_failure_detail"]) elements[key].textContent = "--";
+  elements.imu_console_progress.value = 0;
+  elements.imu_console_progress_value.textContent = "0%";
+  elements.imu_console_still_confirm.checked = false;
+  elements.imu_model_yaw.textContent = "0.0°";
+  targetOrientationYaw = 0;
+  setBadge(elements.imu_console_state, "等待连接");
+  setBadge(elements.imu_console_cal_state, "待机");
+  renderCharts();
   updateControlAvailability();
 }
 
@@ -483,12 +630,14 @@ function updateControlAvailability() {
   const calibrationBusy = Boolean(latestTelemetry?.calibrationBusy);
   elements.estop_button.disabled = !online;
   elements.clear_estop_button.disabled = !online || calibrationBusy;
-  for (const element of [elements.zero_yaw_button, elements.gyro_cal_button, elements.send_wheels_button,
+  for (const element of [elements.zero_yaw_button, elements.gyro_cal_button, elements.imu_console_zero_button,
+    elements.send_wheels_button,
     elements.stop_wheels_button, elements.start_tracking_button, elements.stop_tracking_button,
     elements.read_params_button, elements.apply_params_button, elements.save_params_button]) {
     element.disabled = !online || calibrationBusy;
   }
   elements.start_gyro_cal_button.disabled = !online || calibrationBusy || !elements.gyro_still_confirm.checked;
+  elements.imu_console_cal_button.disabled = !online || calibrationBusy || !elements.imu_console_still_confirm.checked;
   const angleConfirmed = elements.imu_mounted_confirm.checked && elements.ground_confirm.checked && elements.direction_confirm.checked;
   elements.start_angle_cal_button.disabled = !online || calibrationBusy || !latestTelemetry?.imuCalibrated || !angleConfirmed;
   elements.abort_cal_button.disabled = !online || !calibrationBusy;
@@ -711,6 +860,10 @@ function bindEvents() {
       candidate.setAttribute("aria-selected", String(active));
     });
     document.querySelectorAll(".view").forEach((view) => view.classList.toggle("is-active", view.dataset.panel === tab.dataset.view));
+    window.requestAnimationFrame(() => {
+      renderCharts();
+      resizeOrientationView();
+    });
   }));
   elements.connect_button.addEventListener("click", async () => {
     if (activeSession) { await endSession(true); return; }
@@ -721,6 +874,9 @@ function bindEvents() {
   elements.clear_estop_button.addEventListener("click", () => command((session) => session.clearEstop(), "底盘已回到 READY"));
   elements.zero_yaw_button.addEventListener("click", () => command((session) => session.zeroYaw(), "航向已清零"));
   elements.gyro_cal_button.addEventListener("click", () => command((session) => session.calibrateGyro(), "静态标定已开始"));
+  elements.imu_console_zero_button.addEventListener("click", () => command((session) => session.zeroYaw(), "航向已清零"));
+  elements.imu_console_still_confirm.addEventListener("change", updateControlAvailability);
+  elements.imu_console_cal_button.addEventListener("click", () => command((session) => session.calibrateGyro(), "静态标定已开始"));
   elements.send_wheels_button.addEventListener("click", () => command((session) => session.setWheels(
     Math.round(Number(elements.left_wheel_target.value) * 1000), Math.round(Number(elements.right_wheel_target.value) * 1000)), "双轮目标已发送"));
   elements.stop_wheels_button.addEventListener("click", () => command((session) => session.setWheels(0, 0), "双轮已停止"));
@@ -757,11 +913,17 @@ function bindEvents() {
   elements.update_confirm.addEventListener("change", setUpdateControls);
   elements.update_start_button.addEventListener("click", () => performUpdate(false));
   elements.update_recovery_button.addEventListener("click", () => performUpdate(true));
+  window.addEventListener("resize", () => window.requestAnimationFrame(() => {
+    renderCharts();
+    resizeOrientationView();
+  }));
 }
 
 function initialize() {
   createSensors();
   bindEvents();
+  try { initializeOrientationView(); }
+  catch (error) { console.error("3D IMU 初始化失败", error); }
   updateChannelOptions();
   renderMotorMapping({ leftMotorChannel: 0, rightMotorChannel: 2 });
   clearDisplay();

@@ -90,7 +90,7 @@ button { letter-spacing: 0; }
 .sensor-cell.is-active { border-color: #17492f; background: #2e7954; color: #fff; }
 .line-scale { position: relative; height: 26px; margin: 0 20px 20px; display: flex; justify-content: space-between; align-items: flex-end; border-top: 1px solid #9aa5ac; color: var(--muted); font-size: 9px; }
 .line-scale i { position: absolute; top: -6px; left: 50%; width: 2px; height: 14px; background: var(--red); transform: translateX(-50%); transition: left 80ms linear; }
-.chart-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid #e0e4e7; }
+.chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid #e0e4e7; }
 .chart-grid > div { min-width: 0; padding: 12px; border-left: 1px solid #e0e4e7; }
 .chart-grid > div:first-child { border-left: 0; }
 .chart-grid span { display: block; margin-bottom: 6px; color: var(--muted); font-size: 10px; }
@@ -108,6 +108,40 @@ button { letter-spacing: 0; }
 .value-list dt { color: var(--muted); font-size: 10px; }
 .value-list dd { margin: 0; font: 700 11px ui-monospace, monospace; }
 .imu-panel .button-row { padding: 14px; }
+
+.imu-section-heading { align-items: center; }
+.imu-metric-band { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.imu-metric-band strong { font-size: 17px; }
+.imu-attitude-stage { position: relative; height: 360px; margin-bottom: 14px; overflow: hidden; border-top: 1px solid #343c3f; border-bottom: 1px solid #343c3f; background: #171b1c; color: #fff; }
+.imu-attitude-stage canvas { width: 100%; height: 100%; display: block; }
+.imu-stage-title, .imu-stage-readout { position: absolute; z-index: 2; top: 20px; display: grid; gap: 5px; pointer-events: none; }
+.imu-stage-title { left: 22px; }
+.imu-stage-readout { right: 22px; text-align: right; }
+.imu-stage-title span, .imu-stage-readout span { color: #aeb8ba; font-size: 9px; font-weight: 800; }
+.imu-stage-title strong { font-size: 15px; }
+.imu-stage-readout strong { font: 700 28px ui-monospace, "Cascadia Mono", monospace; }
+.imu-axis-legend { position: absolute; z-index: 2; right: 22px; bottom: 22px; display: flex; gap: 14px; color: #d9dfe0; font-size: 10px; pointer-events: none; }
+.imu-axis-legend span::before { content: ""; width: 7px; height: 7px; margin-right: 5px; display: inline-block; }
+.imu-axis-legend span[data-axis="x"]::before { background: #e1484e; }
+.imu-axis-legend span[data-axis="y"]::before { background: #47b36b; }
+.imu-axis-legend span[data-axis="z"]::before { background: #4387dd; }
+.imu-attitude-stage > p { position: absolute; z-index: 2; left: 22px; bottom: 19px; margin: 0; color: #aeb8ba; font-size: 10px; pointer-events: none; }
+.imu-workbench { display: grid; grid-template-columns: minmax(0, 1fr) minmax(290px, 340px); gap: 14px; align-items: start; }
+.waveform-window { color: var(--muted); font-size: 10px; }
+.imu-chart-stack > div { min-width: 0; padding: 13px 15px 15px; border-top: 1px solid #e0e4e7; }
+.imu-chart-stack > div:first-child { border-top: 0; }
+.imu-chart-stack header { min-height: 22px; display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 10px; }
+.imu-chart-stack header > strong { color: #26343d; font: 700 10px ui-monospace, "Cascadia Mono", monospace; }
+.imu-chart-stack canvas { width: 100%; height: 150px; display: block; background: #f8f9f9; }
+.chart-legend { display: flex; align-items: center; gap: 5px; }
+.chart-legend i { width: 13px; height: 2px; display: inline-block; }
+.chart-legend i[data-series="yaw"] { background: #26343d; }
+.chart-legend i[data-series="reference"] { margin-left: 5px; background: #b33a42; }
+.imu-console-panel { min-width: 0; }
+.imu-console-values { border-bottom: 1px solid #e0e4e7; }
+.imu-console-actions { padding: 4px 16px 16px; }
+.imu-console-actions .confirm-row { margin-left: 0; margin-right: 0; }
+.imu-console-actions .button + .confirm-row { margin-top: 14px; }
 
 .wheel-panel { margin-top: 14px; }
 .wheel-control-grid { padding: 16px; display: grid; grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) repeat(4, auto); gap: 8px; }
@@ -165,7 +199,9 @@ progress { width: calc(100% - 32px); height: 9px; margin: 16px 16px 4px; accent-
   .metric-band { grid-template-columns: repeat(3, 1fr); }
   .metric-band div:nth-child(4) { border-left: 0; border-top: 1px solid #e0e4e7; }
   .metric-band div:nth-child(5) { border-top: 1px solid #e0e4e7; }
+  .imu-metric-band div:nth-child(n+4) { border-top: 1px solid #e0e4e7; }
   .monitor-grid { grid-template-columns: 1fr; }
+  .imu-workbench { grid-template-columns: 1fr; }
   .wheel-control-grid { grid-template-columns: 1fr 1fr 1fr; }
   .parameter-layout { grid-template-columns: 1fr 1fr; }
   .parameter-layout .inner-loop, .parameter-layout .drive-mapping { grid-column: span 2; }
@@ -188,6 +224,12 @@ progress { width: calc(100% - 32px); height: 9px; margin: 16px 16px 4px; accent-
   .metric-band { grid-template-columns: 1fr 1fr; }
   .metric-band div:nth-child(3), .metric-band div:nth-child(5) { border-left: 0; }
   .metric-band div:nth-child(n+3) { border-top: 1px solid #e0e4e7; }
+  .imu-attitude-stage { height: 300px; }
+  .imu-stage-title { left: 14px; top: 14px; }
+  .imu-stage-readout { right: 14px; top: 14px; }
+  .imu-stage-readout strong { font-size: 22px; }
+  .imu-axis-legend { right: 14px; bottom: 14px; gap: 9px; }
+  .imu-attitude-stage > p { left: 14px; right: 14px; bottom: 38px; max-width: 260px; line-height: 1.5; }
   .sensor-track { margin-left: 10px; margin-right: 10px; gap: 2px; }
   .sensor-cell { font-size: 7px; }
   .chart-grid { grid-template-columns: 1fr; }
