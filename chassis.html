@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#eef1f3">
     <title>灰度循迹小车底盘</title>
     <link rel="icon" href="data:,">
-    <link rel="stylesheet" href="./chassis.css?v=20260726-1">
+    <link rel="stylesheet" href="./chassis.css?v=20260726-4">
   </head>
   <body>
     <header class="app-header">
@@ -67,6 +67,7 @@
             <div class="chart-grid">
               <div><span>灰度偏差</span><canvas id="line-chart" width="720" height="160"></canvas></div>
               <div><span>航向 / 目标</span><canvas id="yaw-chart" width="720" height="160"></canvas></div>
+              <div><span>Z 轴角速度 · <b id="gyro-chart-range">±5 °/s</b></span><canvas id="gyro-chart" width="720" height="160" aria-label="Z 轴角速度波形"></canvas></div>
             </div>
           </section>
 
@@ -229,6 +230,6 @@
     </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-    <script type="module" src="./chassis_app.mjs?v=20260726-3"></script>
+    <script type="module" src="./chassis_app.mjs?v=20260726-4"></script>
   </body>
 </html>

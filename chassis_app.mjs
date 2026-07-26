@@ -27,7 +27,8 @@ const elements = Object.fromEntries([
   "connection-state", "connection-label", "connect-button", "clear-estop-button", "estop-button",
   "support-banner", "device-name", "firmware-version", "uptime-value", "state-value",
   "line-error", "yaw-value", "angle-error", "gyro-value", "steer-value", "line-state",
-  "gray-bits", "sensor-track", "line-cursor", "line-chart", "yaw-chart", "imu-state",
+  "gray-bits", "sensor-track", "line-cursor", "line-chart", "yaw-chart", "gyro-chart",
+  "gyro-chart-range", "imu-state",
   "yaw-needle", "yaw-dial-value", "yaw-reference", "imu-bias", "peak-gyro", "response-time",
   "zero-yaw-button", "gyro-cal-button", "control-mode", "left-wheel-target", "right-wheel-target",
   "left-wheel-label", "right-wheel-label", "left-wheel-status-label", "right-wheel-status-label",
@@ -60,6 +61,7 @@ let selectedUpdate = null;
 let toastTimer = null;
 const lineHistory = [];
 const yawHistory = [];
+const gyroHistory = [];
 
 function sleep(ms) { return new Promise((resolve) => window.setTimeout(resolve, ms)); }
 function hex(value, width = 8) { return `0x${(value >>> 0).toString(16).toUpperCase().padStart(width, "0")}`; }
@@ -327,6 +329,17 @@ function setBadge(element, label, state = "") {
   if (state) element.dataset.state = state; else delete element.dataset.state;
 }
 
+function symmetricChartRange(rows, minimumAbs, maximumAbs) {
+  let observedAbs = minimumAbs;
+  for (const row of rows) {
+    for (const value of row) {
+      if (Number.isFinite(value)) observedAbs = Math.max(observedAbs, Math.abs(value));
+    }
+  }
+  const step = observedAbs <= 20 ? 5 : observedAbs <= 100 ? 10 : 50;
+  return Math.min(maximumAbs, Math.ceil(observedAbs / step) * step);
+}
+
 function renderTelemetry(value) {
   latestTelemetry = value;
   elements.uptime_value.textContent = durationLabel(value.uptimeMs);
@@ -368,10 +381,15 @@ function renderTelemetry(value) {
 
   lineHistory.push([value.linePositionMm]);
   yawHistory.push([value.yawDeg, value.yawReferenceDeg]);
+  gyroHistory.push([value.gyroZDps]);
   if (lineHistory.length > 160) lineHistory.shift();
   if (yawHistory.length > 160) yawHistory.shift();
+  if (gyroHistory.length > 160) gyroHistory.shift();
+  const gyroRange = symmetricChartRange(gyroHistory, 5, 1000);
+  elements.gyro_chart_range.textContent = `±${gyroRange} °/s`;
   drawChart(elements.line_chart, lineHistory, ["#246746"], 65);
   drawChart(elements.yaw_chart, yawHistory, ["#26343d", "#b33a42"], 45);
+  drawChart(elements.gyro_chart, gyroHistory, ["#2f64d6"], gyroRange);
   updateControlAvailability();
 }
 
@@ -417,6 +435,11 @@ function clearDisplay() {
   document.querySelectorAll(".sensor-cell").forEach((cell) => cell.classList.remove("is-active"));
   lineHistory.length = 0;
   yawHistory.length = 0;
+  gyroHistory.length = 0;
+  elements.gyro_chart_range.textContent = "±5 °/s";
+  drawChart(elements.line_chart, lineHistory, ["#246746"], 65);
+  drawChart(elements.yaw_chart, yawHistory, ["#26343d", "#b33a42"], 45);
+  drawChart(elements.gyro_chart, gyroHistory, ["#2f64d6"], 5);
   updateControlAvailability();
 }
 
