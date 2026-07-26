@@ -99,8 +99,8 @@
             <span class="badge" id="control-mode">已停止</span>
           </header>
           <div class="wheel-control-grid">
-            <label><span id="left-wheel-label">左轮 A</span><input id="left-wheel-target" type="number" min="-120" max="120" step="1" value="0"><em>rpm</em></label>
-            <label><span id="right-wheel-label">右轮 C</span><input id="right-wheel-target" type="number" min="-120" max="120" step="1" value="0"><em>rpm</em></label>
+            <label><span id="left-wheel-label">左轮 A</span><input id="left-wheel-target" type="number" step="1" value="0"><em>rpm</em></label>
+            <label><span id="right-wheel-label">右轮 C</span><input id="right-wheel-target" type="number" step="1" value="0"><em>rpm</em></label>
             <button class="button primary" id="send-wheels-button" type="button" disabled>发送双轮目标</button>
             <button class="button secondary" id="stop-wheels-button" type="button" disabled>双轮停止</button>
             <button class="button primary green" id="start-tracking-button" type="button" disabled>启动循迹</button>
@@ -298,6 +298,6 @@
     </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-    <script type="module" src="./chassis_app.mjs?v=20260726-5"></script>
+    <script type="module" src="./chassis_app.mjs?v=20260726-6"></script>
   </body>
 </html>

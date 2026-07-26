@@ -15,6 +15,7 @@ export const PARAM_VERSION = 2;
 export const PARAM_SIZE = 64;
 export const ANGLE_AUTOTUNE_SAFETY_TOKEN = 0x45464153;
 export const CAP_MOTOR_BRIDGE = 1 << 5;
+export const CAP_MOTOR_LIMITS = 1 << 6;
 
 export const COMMAND = Object.freeze({
   PING: 0x01,
@@ -30,6 +31,7 @@ export const COMMAND = Object.freeze({
   GET_PARAMS: 0x20,
   SET_PARAMS: 0x21,
   SAVE_PARAMS: 0x22,
+  GET_MOTOR_LIMITS: 0x23,
   ENTER_UPDATE: 0x30,
   ENTER_MOTOR_BRIDGE: 0x31,
   ACK: 0x7e,
@@ -142,6 +144,22 @@ export function decodeParams(payload) {
     leftMotorChannel: version >= 2 ? view.getUint8(52) : 0,
     rightMotorChannel: version >= 2 ? view.getUint8(53) : 2,
   });
+}
+
+export function decodeMotorLimits(payload) {
+  if (payload.length !== 20) throw new ProtocolError("Motor limit payload length is invalid");
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  const syncedValue = view.getUint8(0);
+  if (syncedValue > 1 || view.getUint8(1) !== 4 ||
+      view.getUint16(2, true) !== 0) {
+    throw new ProtocolError("Motor limit payload format is invalid");
+  }
+  const limitsMrpm = Object.freeze(Array.from({ length: 4 }, (_, index) =>
+    view.getInt32(4 + index * 4, true)));
+  if (syncedValue && limitsMrpm.some((limit) => limit <= 0)) {
+    throw new ProtocolError("Motor Flash speed limit is invalid");
+  }
+  return Object.freeze({ synced: Boolean(syncedValue), limitsMrpm });
 }
 
 export function encodeParams(params, version = PARAM_VERSION) {

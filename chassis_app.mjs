@@ -1,16 +1,24 @@
 import {
   ANGLE_AUTOTUNE_SAFETY_TOKEN,
+  CAP_MOTOR_LIMITS,
   COMMAND,
   FrameDecoder,
   ProtocolError,
   decodeCommandResponse,
   decodeIdentity,
+  decodeMotorLimits,
   decodeParams,
   decodeTelemetry,
   encodeFrame,
   encodeParams,
   makeIntPayload,
-} from "./chassis_protocol.mjs";
+} from "./chassis_protocol.mjs?v=20260726-6";
+import {
+  LEGACY_SAFE_LIMIT_MRPM,
+  applyWheelInputBounds,
+  resolveWheelLimits,
+  wheelTargetsWithinLimits,
+} from "./chassis_wheel_limits.mjs?v=20260726-6";
 import {
   registerSerialReleaseHandler,
   requestSerialHandoff,
@@ -60,6 +68,7 @@ const motorChannelNames = ["A", "B", "C", "D"];
 let activeSession = null;
 let latestTelemetry = null;
 let latestParams = null;
+let latestMotorLimits = null;
 let pollingToken = 0;
 let updateBusy = false;
 let connectionBusy = false;
@@ -317,6 +326,10 @@ class ChassisSession {
     this.parameterVersion = params.parameterVersion;
     return params;
   }
+  async getMotorLimits() {
+    return decodeMotorLimits(await this.transport.request(
+      COMMAND.GET_MOTOR_LIMITS));
+  }
   async setParams(params) {
     await this.transport.request(COMMAND.SET_PARAMS,
       encodeParams(params, this.parameterVersion || 2));
@@ -566,6 +579,9 @@ function drawChart(canvas, rows, colors, fixedAbs) {
 
 function clearDisplay() {
   latestTelemetry = null;
+  latestParams = null;
+  latestMotorLimits = null;
+  applyWheelInputLimits();
   elements.device_name.textContent = "等待连接";
   elements.firmware_version.textContent = "--";
   elements.uptime_value.textContent = "--";
@@ -608,6 +624,11 @@ function renderMotorMapping(params) {
   elements.right_wheel_status_label.textContent = `右轮 ${right} 目标`;
   elements.direction_confirm_label.textContent = `左轮 ${left}、右轮 ${right} 的正值均朝前`;
 }
+function applyWheelInputLimits(params = latestParams ||
+    { leftMotorChannel: 0, rightMotorChannel: 2 }) {
+  return applyWheelInputBounds(elements.left_wheel_target,
+    elements.right_wheel_target, latestMotorLimits, params);
+}
 function updateChannelOptions() {
   const left = elements.parameter_form.elements.namedItem("leftMotorChannel");
   const right = elements.parameter_form.elements.namedItem("rightMotorChannel");
@@ -623,10 +644,12 @@ function populateParams(params) {
   }
   updateChannelOptions();
   renderMotorMapping(params);
+  applyWheelInputLimits(params);
 }
 
 function updateControlAvailability() {
   const online = Boolean(activeSession) && !updateBusy;
+  const motorLimitsReady = Boolean(latestMotorLimits?.synced && latestParams);
   const calibrationBusy = Boolean(latestTelemetry?.calibrationBusy);
   elements.estop_button.disabled = !online;
   elements.clear_estop_button.disabled = !online || calibrationBusy;
@@ -636,10 +659,15 @@ function updateControlAvailability() {
     elements.read_params_button, elements.apply_params_button, elements.save_params_button]) {
     element.disabled = !online || calibrationBusy;
   }
+  for (const element of [elements.send_wheels_button,
+    elements.stop_wheels_button, elements.start_tracking_button]) {
+    element.disabled = !online || calibrationBusy || !motorLimitsReady;
+  }
   elements.start_gyro_cal_button.disabled = !online || calibrationBusy || !elements.gyro_still_confirm.checked;
   elements.imu_console_cal_button.disabled = !online || calibrationBusy || !elements.imu_console_still_confirm.checked;
   const angleConfirmed = elements.imu_mounted_confirm.checked && elements.ground_confirm.checked && elements.direction_confirm.checked;
-  elements.start_angle_cal_button.disabled = !online || calibrationBusy || !latestTelemetry?.imuCalibrated || !angleConfirmed;
+  elements.start_angle_cal_button.disabled = !online || calibrationBusy ||
+    !motorLimitsReady || !latestTelemetry?.imuCalibrated || !angleConfirmed;
   elements.abort_cal_button.disabled = !online || !calibrationBusy;
   elements.apply_candidate_button.disabled = !online || calibrationBusy || !latestTelemetry?.candidateValid;
   setUpdateControls();
@@ -676,7 +704,21 @@ async function activateSession(session) {
   elements.firmware_version.textContent = firmwareLabel(session.version);
   elements.connect_button.textContent = "断开底盘";
   setConnection("online", "底盘在线");
-  try { populateParams(await session.getParams()); } catch (error) { toast(`参数读取失败：${error.message}`, "error"); }
+  let params = null;
+  try { params = await session.getParams(); }
+  catch (error) { toast(`参数读取失败：${error.message}`, "error"); }
+  try {
+    latestMotorLimits = (session.identity.capabilities & CAP_MOTOR_LIMITS) ?
+      await session.getMotorLimits() : Object.freeze({ synced: true,
+        limitsMrpm: Object.freeze(Array(4).fill(LEGACY_SAFE_LIMIT_MRPM)) });
+    if (!latestMotorLimits.synced) {
+      toast("电机板 Flash 参数尚未同步，双轮控制已锁定", "error");
+    }
+  } catch (error) {
+    latestMotorLimits = null;
+    toast(`电机限速读取失败：${error.message}`, "error");
+  }
+  if (params) populateParams(params); else applyWheelInputLimits();
   updateControlAvailability();
   void pollLoop(session, pollingToken);
 }
@@ -877,8 +919,16 @@ function bindEvents() {
   elements.imu_console_zero_button.addEventListener("click", () => command((session) => session.zeroYaw(), "航向已清零"));
   elements.imu_console_still_confirm.addEventListener("change", updateControlAvailability);
   elements.imu_console_cal_button.addEventListener("click", () => command((session) => session.calibrateGyro(), "静态标定已开始"));
-  elements.send_wheels_button.addEventListener("click", () => command((session) => session.setWheels(
-    Math.round(Number(elements.left_wheel_target.value) * 1000), Math.round(Number(elements.right_wheel_target.value) * 1000)), "双轮目标已发送"));
+  elements.send_wheels_button.addEventListener("click", () => command(async (session) => {
+    const leftMrpm = Math.round(Number(elements.left_wheel_target.value) * 1000);
+    const rightMrpm = Math.round(Number(elements.right_wheel_target.value) * 1000);
+    const limits = resolveWheelLimits(latestMotorLimits, latestParams);
+    if (!limits.synced) throw new ProtocolError("电机板 Flash 参数尚未同步");
+    if (!wheelTargetsWithinLimits(leftMrpm, rightMrpm, limits)) {
+      throw new ProtocolError(`目标超过当前通道上限：左 ${limits.leftRpm} rpm，右 ${limits.rightRpm} rpm`);
+    }
+    await session.setWheels(leftMrpm, rightMrpm);
+  }, "双轮目标已发送"));
   elements.stop_wheels_button.addEventListener("click", () => command((session) => session.setWheels(0, 0), "双轮已停止"));
   elements.start_tracking_button.addEventListener("click", () => command((session) => session.setRun(true), "循迹已启动"));
   elements.stop_tracking_button.addEventListener("click", () => command((session) => session.setRun(false), "循迹已停止"));
