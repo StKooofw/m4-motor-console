@@ -7,22 +7,24 @@
     <title>M4 Motor Console</title>
     <link rel="icon" href="data:,">
     <link rel="stylesheet" href="./styles.css">
-    <link rel="stylesheet" href="./editorial-ui.css?v=20260728-1">
+    <link rel="stylesheet" href="./editorial-ui.css?v=20260728-2">
   </head>
   <body class="motor-console">
-    <header class="site-header">
-      <div class="site-header__inner">
+    <header class="site-header app-header">
+      <div class="site-header__inner app-header__inner">
         <a class="product-switch-link" href="./index.html">产品选择</a>
-        <div class="brand-block">
-          <div class="brand-mark" aria-hidden="true">M4</div>
-          <div>
-            <div class="brand-name">M4 MOTOR LAB</div>
-            <div class="brand-subtitle">PRECISION DRIVE · MOTION CONTROL</div>
+        <a class="brand motor-brand" href="./index.html" aria-label="返回产品选择">
+          <span class="brand-mark" aria-hidden="true">M4</span>
+          <span><strong>M4 MOTOR LAB</strong><small>PRECISION DRIVE · MOTION CONTROL</small></span>
+        </a>
+        <div class="header-controls">
+          <div class="connection-state" id="connection-state" data-state="offline">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span id="connection-label">未连接</span>
           </div>
-        </div>
-        <div class="header-meta">
-          <span>MSPM0G3507</span>
-          <span>UART · 115200 · 8N1</span>
+          <button class="button button-dark" id="connect-button" type="button">连接设备</button>
+          <button class="button button-secondary" id="clear-estop-button" type="button" disabled>解除急停</button>
+          <button class="button button-danger" id="estop-button" type="button" disabled>全部急停</button>
         </div>
       </div>
     </header>
@@ -32,53 +34,34 @@
         当前环境不支持 Web Serial。请使用桌面版 Chrome 或 Edge，并通过 localhost 或 HTTPS 打开。
       </div>
 
-      <header class="tool-topbar">
-        <div>
-          <div class="section-kicker">WEB SERIAL MOTOR TOOL</div>
-          <h1>四路电机调试台</h1>
+      <header class="workspace-header motor-workspace-header">
+        <div class="workspace-title">
+          <span class="kicker">CM4M · MSPM0G3507</span>
+          <h1>四路闭环电机驱动</h1>
+          <span class="workspace-interface">UART · 115200 · 8N1</span>
         </div>
-        <div class="safety-actions">
-          <button class="button button-secondary" id="clear-estop-button" type="button" disabled>解除急停</button>
-          <button class="button button-danger" id="estop-button" type="button" disabled>全部急停</button>
-        </div>
+        <dl class="identity-strip motor-identity-strip">
+          <div><dt>设备</dt><dd><span id="device-name">等待设备</span><small id="adapter-name">未授权串口</small></dd></div>
+          <div><dt>固件</dt><dd id="firmware-version">--</dd></div>
+          <div><dt>运行时间</dt><dd id="uptime-value">--</dd></div>
+          <div><dt>故障字</dt><dd id="fault-value">--</dd></div>
+          <div><dt>采样链路</dt><dd id="link-rate">--</dd></div>
+        </dl>
       </header>
 
-      <nav class="view-tabs" aria-label="工作区" role="tablist">
-        <button class="view-tab is-active" type="button" role="tab" aria-selected="true" data-view="monitor">实时监控</button>
-        <button class="view-tab" type="button" role="tab" aria-selected="false" data-view="parameters">参数设置</button>
-        <button class="view-tab" type="button" role="tab" aria-selected="false" data-view="update">固件升级</button>
-      </nav>
+      <div class="motor-workspace">
+        <nav class="view-tabs" aria-label="工作区" role="tablist">
+          <span class="tabs-label">工作区</span>
+          <button class="view-tab is-active" type="button" role="tab" aria-selected="true" data-view="monitor"><span>01</span>实时监控</button>
+          <button class="view-tab" type="button" role="tab" aria-selected="false" data-view="parameters"><span>02</span>参数设置</button>
+          <button class="view-tab" type="button" role="tab" aria-selected="false" data-view="update"><span>03</span>固件升级</button>
+        </nav>
+
+        <div class="motor-workspace-content">
 
       <section class="view-panel is-active" id="monitor-view" data-panel="monitor">
         <div class="monitor-grid">
-          <aside class="left-rail" aria-label="连接与设备">
-            <section class="side-panel connection-panel">
-              <div class="panel-title-row">
-                <span class="panel-title">设备连接</span>
-                <div class="connection-state" id="connection-state" data-state="offline">
-                  <span class="status-dot" aria-hidden="true"></span>
-                  <span id="connection-label">未连接</span>
-                </div>
-              </div>
-              <label class="static-field">
-                <span>波特率</span>
-                <strong>115200</strong>
-              </label>
-              <button class="button button-dark button-block" id="connect-button" type="button">连接设备</button>
-            </section>
-
-            <section class="side-panel device-panel" aria-label="设备信息">
-              <div class="panel-eyebrow">DEVICE</div>
-              <strong class="device-name" id="device-name">等待设备</strong>
-              <span class="adapter-name" id="adapter-name">未授权串口</span>
-              <dl class="device-metrics">
-                <div><dt>固件</dt><dd id="firmware-version">--</dd></div>
-                <div><dt>运行时间</dt><dd id="uptime-value">--</dd></div>
-                <div><dt>故障字</dt><dd id="fault-value">--</dd></div>
-                <div><dt>采样链路</dt><dd id="link-rate">--</dd></div>
-              </dl>
-            </section>
-
+          <aside class="left-rail" aria-label="电机通道">
             <section class="side-panel channel-panel">
               <div class="panel-title-row">
                 <span class="panel-title">电机通道</span>
@@ -391,6 +374,8 @@
           </aside>
         </div>
       </section>
+        </div>
+      </div>
     </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
