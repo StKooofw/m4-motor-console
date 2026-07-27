@@ -6,22 +6,24 @@
     <meta name="theme-color" content="#ffffff">
     <title>灰度循迹小车底盘</title>
     <link rel="icon" href="data:,">
-    <link rel="stylesheet" href="./chassis.css?v=20260726-5">
-    <link rel="stylesheet" href="./editorial-ui.css?v=20260728-1">
+    <link rel="stylesheet" href="./chassis.css?v=20260728-2">
   </head>
   <body class="chassis-console">
     <header class="app-header">
-      <a class="brand" href="./index.html" aria-label="返回产品选择">
-        <span class="brand-mark">GC</span>
-        <span><strong>GRAY CHASSIS</strong><small>双轮差速 · CHAS</small></span>
-      </a>
-      <div class="header-controls">
-        <div class="connection-state" id="connection-state" data-state="offline">
-          <span class="status-dot"></span><span id="connection-label">未连接</span>
+      <div class="app-header__inner">
+        <a class="product-switch-link" href="./index.html">产品选择</a>
+        <a class="brand" href="./index.html" aria-label="返回产品选择">
+          <span class="brand-mark">GC</span>
+          <span><strong>GRAY CHASSIS</strong><small>DIFFERENTIAL DRIVE · CHAS</small></span>
+        </a>
+        <div class="header-controls">
+          <div class="connection-state" id="connection-state" data-state="offline">
+            <span class="status-dot"></span><span id="connection-label">未连接</span>
+          </div>
+          <button class="button primary" id="connect-button" type="button">连接底盘</button>
+          <button class="button secondary" id="clear-estop-button" type="button" disabled>解除急停</button>
+          <button class="button danger" id="estop-button" type="button" disabled>急停</button>
         </div>
-        <button class="button secondary" id="connect-button" type="button">连接底盘</button>
-        <button class="button secondary" id="clear-estop-button" type="button" disabled>解除急停</button>
-        <button class="button danger" id="estop-button" type="button" disabled>急停</button>
       </div>
     </header>
 
@@ -29,9 +31,10 @@
       <div class="support-banner" id="support-banner" hidden>当前浏览器不能使用 Web Serial。</div>
 
       <header class="workspace-header">
-        <div>
-          <span class="kicker">MSPM0G3507 · UART0 115200</span>
+        <div class="workspace-title">
+          <span class="kicker">CHAS · MSPM0G3507</span>
           <h1>灰度循迹小车底盘</h1>
+          <span class="workspace-interface">UART0 · 115200 · 8N1</span>
         </div>
         <dl class="identity-strip">
           <div><dt>设备</dt><dd id="device-name">等待连接</dd></div>
@@ -41,13 +44,17 @@
         </dl>
       </header>
 
-      <nav class="tabs" role="tablist" aria-label="底盘工作区">
-        <button class="tab is-active" type="button" data-view="monitor" role="tab" aria-selected="true">实时监控</button>
-        <button class="tab" type="button" data-view="imu" role="tab" aria-selected="false">陀螺仪</button>
-        <button class="tab" type="button" data-view="parameters" role="tab" aria-selected="false">三级控制参数</button>
-        <button class="tab" type="button" data-view="calibration" role="tab" aria-selected="false">标定</button>
-        <button class="tab" type="button" data-view="update" role="tab" aria-selected="false">底盘固件升级</button>
-      </nav>
+      <div class="chassis-workspace">
+        <nav class="tabs" role="tablist" aria-label="底盘工作区">
+          <span class="tabs-label">工作区</span>
+          <button class="tab is-active" type="button" data-view="monitor" role="tab" aria-selected="true"><span>01</span>实时监控</button>
+          <button class="tab" type="button" data-view="imu" role="tab" aria-selected="false"><span>02</span>陀螺仪</button>
+          <button class="tab" type="button" data-view="parameters" role="tab" aria-selected="false"><span>03</span>三级控制参数</button>
+          <button class="tab" type="button" data-view="calibration" role="tab" aria-selected="false"><span>04</span>标定</button>
+          <button class="tab" type="button" data-view="update" role="tab" aria-selected="false"><span>05</span>底盘固件升级</button>
+        </nav>
+
+        <div class="workspace-content">
 
       <section class="view is-active" data-panel="monitor">
         <div class="metric-band">
@@ -296,6 +303,8 @@
           </section>
         </div>
       </section>
+        </div>
+      </div>
     </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
