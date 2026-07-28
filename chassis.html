@@ -131,22 +131,25 @@
         </header>
 
         <div class="metric-band imu-metric-band">
-          <div><span>Z 轴角速度</span><strong id="imu-console-gyro">-- °/s</strong></div>
-          <div><span>当前航向</span><strong id="imu-console-yaw">--°</strong></div>
-          <div><span>目标航向</span><strong id="imu-console-reference">--°</strong></div>
-          <div><span>角度误差</span><strong id="imu-console-error">--°</strong></div>
-          <div><span>静态零偏</span><strong id="imu-console-bias">-- °/s</strong></div>
-          <div><span>读取故障</span><strong id="imu-console-failures">--</strong></div>
+          <div><span>滤波 Z 角速度</span><strong id="imu-console-gyro">-- °/s</strong></div>
+          <div><span>原始 Z 角速度</span><strong id="imu-console-raw-gyro">-- °/s</strong></div>
+          <div><span>横滚 Roll</span><strong id="imu-console-roll">--°</strong></div>
+          <div><span>俯仰 Pitch</span><strong id="imu-console-pitch">--°</strong></div>
+          <div><span>相对航向 Yaw</span><strong id="imu-console-yaw">--°</strong></div>
+          <div><span>芯片温度</span><strong id="imu-console-temperature">-- °C</strong></div>
         </div>
 
         <section class="imu-attitude-stage" aria-label="陀螺仪三维姿态">
           <canvas id="imu-orientation-canvas"></canvas>
           <div class="imu-stage-title"><span>3D ATTITUDE</span><strong>ICM45686 姿态</strong></div>
-          <div class="imu-stage-readout"><span>YAW</span><strong id="imu-model-yaw">0.0°</strong></div>
+          <div class="imu-stage-readout">
+            <span>ROLL / PITCH / YAW</span>
+            <strong><b id="imu-model-roll">0.0°</b><b id="imu-model-pitch">0.0°</b><b id="imu-model-yaw">0.0°</b></strong>
+          </div>
           <div class="imu-axis-legend" aria-label="传感器坐标轴">
             <span data-axis="x">X 前向</span><span data-axis="y">Y 左向</span><span data-axis="z">Z 向上</span>
           </div>
-          <p>当前固件输出 Z 轴角速度与融合航向；俯仰和横滚保持中性。</p>
+          <p>六轴融合 · 航向为无磁力计相对角</p>
         </section>
 
         <div class="imu-workbench">
@@ -157,7 +160,7 @@
             </header>
             <div class="imu-chart-stack">
               <div>
-                <header><span>Z 轴角速度</span><strong id="gyro-chart-range">±5 °/s</strong></header>
+                <header><span>Z 轴角速度</span><span class="chart-legend"><i data-series="raw-gyro"></i>原始 <i data-series="filtered-gyro"></i>滤波</span><strong id="gyro-chart-range">±5 °/s</strong></header>
                 <canvas id="gyro-chart" width="960" height="180" aria-label="Z 轴角速度波形"></canvas>
               </div>
               <div>
@@ -177,10 +180,15 @@
               <span class="badge" id="imu-console-cal-state">待机</span>
             </header>
             <dl class="value-list imu-console-values">
+              <div><dt>静止检测</dt><dd id="imu-console-stationary">--</dd></div>
+              <div><dt>加速度模长</dt><dd id="imu-console-accel-norm">-- g</dd></div>
+              <div><dt>陀螺噪声 RMS</dt><dd id="imu-console-noise">-- °/s</dd></div>
+              <div><dt>Z 轴零偏</dt><dd id="imu-console-bias">-- °/s</dd></div>
+              <div><dt>目标 / 误差</dt><dd><span id="imu-console-reference">--°</span> / <span id="imu-console-error">--°</span></dd></div>
+              <div><dt>累计读取故障</dt><dd id="imu-console-failures">--</dd></div>
               <div><dt>标定进度</dt><dd id="imu-console-progress-value">0%</dd></div>
               <div><dt>响应峰值</dt><dd id="imu-console-peak">-- °/s</dd></div>
               <div><dt>响应时间</dt><dd id="imu-console-response">-- ms</dd></div>
-              <div><dt>累计读取故障</dt><dd id="imu-console-failure-detail">--</dd></div>
             </dl>
             <progress id="imu-console-progress" max="100" value="0"></progress>
             <div class="imu-console-actions">
@@ -312,6 +320,6 @@
     </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-    <script type="module" src="./chassis_app.mjs?v=20260729-1"></script>
+    <script type="module" src="./chassis_app.mjs?v=20260729-2"></script>
   </body>
 </html>

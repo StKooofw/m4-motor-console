@@ -568,7 +568,8 @@ select:focus-visible {
 .imu-stage-title span,
 .imu-stage-readout span { color: #aeb4b8; font-size: 9px; font-weight: 750; }
 .imu-stage-title strong { font-size: 16px; }
-.imu-stage-readout strong { font: 650 30px ui-monospace, "Cascadia Mono", monospace; }
+.imu-stage-readout strong { display: grid; grid-template-columns: repeat(3, minmax(0, auto)); gap: 12px; font: 650 22px ui-monospace, "Cascadia Mono", monospace; }
+.imu-stage-readout b { font: inherit; }
 .imu-axis-legend { position: absolute; z-index: 2; right: 24px; bottom: 24px; display: flex; gap: 14px; color: #d9dddf; font-size: 10px; pointer-events: none; }
 .imu-axis-legend span::before { content: ""; width: 7px; height: 7px; margin-right: 5px; display: inline-block; }
 .imu-axis-legend span[data-axis="x"]::before { background: #e1484e; }
@@ -592,6 +593,8 @@ select:focus-visible {
 .chart-legend i { width: 13px; height: 2px; display: inline-block; }
 .chart-legend i[data-series="yaw"] { background: var(--ink); }
 .chart-legend i[data-series="reference"] { margin-left: 5px; background: var(--red); }
+.chart-legend i[data-series="raw-gyro"] { background: #9aa3a7; }
+.chart-legend i[data-series="filtered-gyro"] { margin-left: 5px; background: #2f64d6; }
 .imu-console-values { border-bottom: 1px solid var(--line-soft); }
 .imu-console-actions { padding: 6px 18px 18px; }
 .imu-console-actions .confirm-row { margin-left: 0; margin-right: 0; }

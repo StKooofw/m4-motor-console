@@ -1,5 +1,6 @@
 import {
   ANGLE_AUTOTUNE_SAFETY_TOKEN,
+  CAP_IMU_FUSION,
   CAP_MOTOR_LIMITS,
   COMMAND,
   FrameDecoder,
@@ -7,13 +8,14 @@ import {
   ProtocolError,
   decodeCommandResponse,
   decodeIdentity,
+  decodeImuTelemetry,
   decodeMotorLimits,
   decodeParams,
   decodeTelemetry,
   encodeFrame,
   encodeParams,
   makeIntPayload,
-} from "./chassis_protocol.mjs?v=20260729-1";
+} from "./chassis_protocol.mjs?v=20260729-2";
 import {
   LEGACY_SAFE_LIMIT_MRPM,
   applyWheelInputBounds,
@@ -53,10 +55,12 @@ const elements = Object.fromEntries([
   "update-board-id", "update-image-length", "update-image-crc", "update-state", "stage-file",
   "stage-bsl", "stage-program", "stage-restart", "update-progress", "update-confirm",
   "update-start-button", "update-recovery-button", "imu-console-state", "imu-console-gyro",
-  "imu-console-yaw", "imu-console-reference", "imu-console-error", "imu-console-bias",
-  "imu-console-failures", "imu-orientation-canvas", "imu-model-yaw", "imu-console-cal-state",
+  "imu-console-raw-gyro", "imu-console-roll", "imu-console-pitch", "imu-console-yaw",
+  "imu-console-temperature", "imu-console-reference", "imu-console-error", "imu-console-bias",
+  "imu-console-failures", "imu-console-stationary", "imu-console-accel-norm", "imu-console-noise",
+  "imu-orientation-canvas", "imu-model-roll", "imu-model-pitch", "imu-model-yaw", "imu-console-cal-state",
   "imu-console-progress", "imu-console-progress-value", "imu-console-peak", "imu-console-response",
-  "imu-console-failure-detail", "imu-console-zero-button", "imu-console-still-confirm",
+  "imu-console-zero-button", "imu-console-still-confirm",
   "imu-console-cal-button", "toast",
 ].map((id) => [id.replaceAll("-", "_"), $(id)]));
 
@@ -68,6 +72,7 @@ const motorChannelNames = ["A", "B", "C", "D"];
 
 let activeSession = null;
 let latestTelemetry = null;
+let latestImuTelemetry = null;
 let latestParams = null;
 let latestMotorLimits = null;
 let pollingToken = 0;
@@ -83,7 +88,11 @@ let orientationRenderer = null;
 let orientationScene = null;
 let orientationCamera = null;
 let orientationModel = null;
+let orientationRoll = 0;
+let orientationPitch = 0;
 let orientationYaw = 0;
+let targetOrientationRoll = 0;
+let targetOrientationPitch = 0;
 let targetOrientationYaw = 0;
 
 function sleep(ms) { return new Promise((resolve) => window.setTimeout(resolve, ms)); }
@@ -305,6 +314,7 @@ class ChassisSession {
     return `VID ${hex(info.usbVendorId, 4)} · PID ${hex(info.usbProductId || 0, 4)}`;
   }
   async telemetry() { return decodeTelemetry(await this.transport.request(COMMAND.GET_TELEMETRY)); }
+  async imuTelemetry() { return decodeImuTelemetry(await this.transport.request(COMMAND.GET_IMU_TELEMETRY)); }
   async setRun(run) { await this.transport.request(COMMAND.SET_RUN, Uint8Array.of(run ? 1 : 0)); }
   async setWheels(leftMrpm, rightMrpm) {
     const payload = makeIntPayload(8, (view) => {
@@ -388,6 +398,7 @@ function initializeOrientationView() {
   orientationScene.add(headingRing);
 
   orientationModel = new THREE.Group();
+  orientationModel.rotation.order = "YXZ";
   orientationScene.add(orientationModel);
   const boardMaterial = new THREE.MeshStandardMaterial({ color: 0x246746, roughness: 0.72, metalness: 0.08 });
   const board = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.2, 2.65), boardMaterial);
@@ -446,7 +457,11 @@ function animateOrientationView() {
   if (!orientationRenderer || !orientationModel || !document.querySelector('[data-panel="imu"].is-active')) return;
   const delta = ((targetOrientationYaw - orientationYaw + 540) % 360) - 180;
   orientationYaw += delta * 0.14;
+  orientationRoll += (targetOrientationRoll - orientationRoll) * 0.14;
+  orientationPitch += (targetOrientationPitch - orientationPitch) * 0.14;
   orientationModel.rotation.y = THREE.MathUtils.degToRad(-orientationYaw);
+  orientationModel.rotation.x = THREE.MathUtils.degToRad(orientationRoll);
+  orientationModel.rotation.z = THREE.MathUtils.degToRad(orientationPitch);
   orientationRenderer.render(orientationScene, orientationCamera);
 }
 
@@ -466,7 +481,7 @@ function symmetricChartRange(rows, minimumAbs, maximumAbs) {
   return Math.min(maximumAbs, Math.ceil(observedAbs / step) * step);
 }
 
-function renderTelemetry(value) {
+function renderTelemetry(value, legacyImu = false) {
   latestTelemetry = value;
   elements.uptime_value.textContent = durationLabel(value.uptimeMs);
   elements.state_value.textContent = stateNames[value.state] || `STATE ${value.state}`;
@@ -489,17 +504,29 @@ function renderTelemetry(value) {
   elements.cal_bias_value.textContent = `${value.imuBiasDps.toFixed(4)} °/s`;
   elements.peak_gyro.textContent = `${value.peakGyroDps.toFixed(2)} °/s`;
   elements.response_time.textContent = `${value.responseTimeMs} ms`;
-  elements.imu_console_gyro.textContent = `${value.gyroZDps.toFixed(2)} °/s`;
-  elements.imu_console_yaw.textContent = `${value.yawDeg.toFixed(2)}°`;
   elements.imu_console_reference.textContent = `${value.yawReferenceDeg.toFixed(2)}°`;
   elements.imu_console_error.textContent = `${value.angleErrorDeg.toFixed(2)}°`;
   elements.imu_console_bias.textContent = `${value.imuBiasDps.toFixed(4)} °/s`;
   elements.imu_console_failures.textContent = String(value.imuFailures);
   elements.imu_console_peak.textContent = `${value.peakGyroDps.toFixed(2)} °/s`;
   elements.imu_console_response.textContent = `${value.responseTimeMs} ms`;
-  elements.imu_console_failure_detail.textContent = String(value.imuFailures);
-  elements.imu_model_yaw.textContent = `${value.yawDeg.toFixed(1)}°`;
-  targetOrientationYaw = value.yawDeg;
+  if (legacyImu) {
+    elements.imu_console_gyro.textContent = `${value.gyroZDps.toFixed(2)} °/s`;
+    elements.imu_console_raw_gyro.textContent = `${value.gyroZDps.toFixed(2)} °/s`;
+    elements.imu_console_roll.textContent = "--°";
+    elements.imu_console_pitch.textContent = "--°";
+    elements.imu_console_yaw.textContent = `${value.yawDeg.toFixed(2)}°`;
+    elements.imu_console_temperature.textContent = "-- °C";
+    elements.imu_console_stationary.textContent = "旧固件未提供";
+    elements.imu_console_accel_norm.textContent = "-- g";
+    elements.imu_console_noise.textContent = "-- °/s";
+    elements.imu_model_roll.textContent = "0.0°";
+    elements.imu_model_pitch.textContent = "0.0°";
+    elements.imu_model_yaw.textContent = `${value.yawDeg.toFixed(1)}°`;
+    targetOrientationRoll = 0;
+    targetOrientationPitch = 0;
+    targetOrientationYaw = value.yawDeg;
+  }
   setBadge(elements.control_mode, modeNames[value.mode] || `MODE ${value.mode}`, value.state === 3 ? "fault" : value.mode ? "ok" : "");
   elements.left_wheel_live.textContent = `${(value.leftTargetMrpm / 1000).toFixed(1)} rpm`;
   elements.right_wheel_live.textContent = `${(value.rightTargetMrpm / 1000).toFixed(1)} rpm`;
@@ -511,7 +538,9 @@ function renderTelemetry(value) {
   const resultLabel = value.calibrationState >= 6 ? calibrationResults[value.calibrationResult] || calibrationLabel : calibrationLabel;
   setBadge(elements.gyro_cal_state, resultLabel, value.calibrationBusy ? "busy" : value.calibrationResult === 1 ? "ok" : value.calibrationState >= 7 ? "fault" : "");
   setBadge(elements.angle_cal_state, resultLabel, value.calibrationBusy ? "busy" : value.candidateValid ? "ok" : value.calibrationState >= 7 ? "fault" : "");
-  setBadge(elements.imu_console_state, value.imuCalibrated ? "在线 · 已标定" : "在线 · 未标定", value.imuCalibrated ? "ok" : "fault");
+  if (legacyImu) setBadge(elements.imu_console_state,
+    value.imuCalibrated ? "在线 · 已标定" : "在线 · 旧版 IMU",
+    value.imuCalibrated ? "ok" : "fault");
   setBadge(elements.imu_console_cal_state, resultLabel, value.calibrationBusy ? "busy" : value.calibrationResult === 1 ? "ok" : value.calibrationState >= 7 ? "fault" : "");
   elements.calibration_progress.value = value.calibrationProgress;
   elements.imu_console_progress.value = value.calibrationProgress;
@@ -522,7 +551,7 @@ function renderTelemetry(value) {
 
   lineHistory.push([value.linePositionMm]);
   yawHistory.push([value.yawDeg, value.yawReferenceDeg]);
-  gyroHistory.push([value.gyroZDps]);
+  if (legacyImu) gyroHistory.push([value.gyroZDps, value.gyroZDps]);
   angleErrorHistory.push([value.angleErrorDeg]);
   if (lineHistory.length > 160) lineHistory.shift();
   if (yawHistory.length > 160) yawHistory.shift();
@@ -530,6 +559,33 @@ function renderTelemetry(value) {
   if (angleErrorHistory.length > 160) angleErrorHistory.shift();
   renderCharts();
   updateControlAvailability();
+}
+
+function renderImuTelemetry(value) {
+  latestImuTelemetry = value;
+  elements.imu_console_gyro.textContent = `${value.gyroDps[2].toFixed(2)} °/s`;
+  elements.imu_console_raw_gyro.textContent = `${value.rawGyroDps[2].toFixed(2)} °/s`;
+  elements.imu_console_roll.textContent = `${value.rollDeg.toFixed(2)}°`;
+  elements.imu_console_pitch.textContent = `${value.pitchDeg.toFixed(2)}°`;
+  elements.imu_console_yaw.textContent = `${value.yawDeg.toFixed(2)}°`;
+  elements.imu_console_temperature.textContent = `${value.temperatureC.toFixed(1)} °C`;
+  elements.imu_console_accel_norm.textContent = `${value.accelNormG.toFixed(3)} g`;
+  elements.imu_console_noise.textContent = `${value.gyroNoiseRmsDps.toFixed(3)} °/s`;
+  elements.imu_console_bias.textContent = `${value.gyroBiasDps[2].toFixed(4)} °/s`;
+  elements.imu_console_stationary.textContent = value.biasTracking ? "静止 · 跟踪零偏" :
+    value.stationary ? "静止" : "运动";
+  elements.imu_model_roll.textContent = `${value.rollDeg.toFixed(1)}°`;
+  elements.imu_model_pitch.textContent = `${value.pitchDeg.toFixed(1)}°`;
+  elements.imu_model_yaw.textContent = `${value.yawDeg.toFixed(1)}°`;
+  targetOrientationRoll = value.rollDeg;
+  targetOrientationPitch = value.pitchDeg;
+  targetOrientationYaw = value.yawDeg;
+  setBadge(elements.imu_console_state,
+    value.calibrated ? "六轴融合 · 已标定" : "六轴融合 · 待标定",
+    value.fusionInitialized ? (value.calibrated ? "ok" : "busy") : "fault");
+  gyroHistory.push([value.rawGyroDps[2], value.gyroDps[2]]);
+  if (gyroHistory.length > 160) gyroHistory.shift();
+  renderCharts();
 }
 
 function renderCharts() {
@@ -540,7 +596,7 @@ function renderCharts() {
   elements.imu_error_chart_range.textContent = `±${errorRange}°`;
   drawChart(elements.line_chart, lineHistory, ["#246746"], 65);
   drawChart(elements.yaw_chart, yawHistory, ["#26343d", "#b33a42"], yawRange);
-  drawChart(elements.gyro_chart, gyroHistory, ["#2f64d6"], gyroRange);
+  drawChart(elements.gyro_chart, gyroHistory, ["#9aa3a7", "#2f64d6"], gyroRange);
   drawChart(elements.imu_yaw_chart, yawHistory, ["#26343d", "#b33a42"], yawRange);
   drawChart(elements.imu_error_chart, angleErrorHistory, ["#aa3037"], errorRange);
 }
@@ -580,6 +636,7 @@ function drawChart(canvas, rows, colors, fixedAbs) {
 
 function clearDisplay() {
   latestTelemetry = null;
+  latestImuTelemetry = null;
   latestParams = null;
   latestMotorLimits = null;
   applyWheelInputLimits();
@@ -593,13 +650,19 @@ function clearDisplay() {
   yawHistory.length = 0;
   gyroHistory.length = 0;
   angleErrorHistory.length = 0;
-  for (const key of ["imu_console_gyro", "imu_console_yaw", "imu_console_reference", "imu_console_error",
+  for (const key of ["imu_console_gyro", "imu_console_raw_gyro", "imu_console_roll", "imu_console_pitch",
+    "imu_console_yaw", "imu_console_temperature", "imu_console_reference", "imu_console_error",
     "imu_console_bias", "imu_console_failures", "imu_console_peak", "imu_console_response",
-    "imu_console_failure_detail"]) elements[key].textContent = "--";
+    "imu_console_stationary", "imu_console_accel_norm",
+    "imu_console_noise"]) elements[key].textContent = "--";
   elements.imu_console_progress.value = 0;
   elements.imu_console_progress_value.textContent = "0%";
   elements.imu_console_still_confirm.checked = false;
+  elements.imu_model_roll.textContent = "0.0°";
+  elements.imu_model_pitch.textContent = "0.0°";
   elements.imu_model_yaw.textContent = "0.0°";
+  targetOrientationRoll = 0;
+  targetOrientationPitch = 0;
   targetOrientationYaw = 0;
   setBadge(elements.imu_console_state, "等待连接");
   setBadge(elements.imu_console_cal_state, "待机");
@@ -676,9 +739,11 @@ function updateControlAvailability() {
 
 async function pollLoop(session, token) {
   let failures = 0;
+  const hasImuFusion = Boolean(session.identity.capabilities & CAP_IMU_FUSION);
   while (activeSession === session && pollingToken === token && !updateBusy) {
     try {
-      renderTelemetry(await session.telemetry());
+      renderTelemetry(await session.telemetry(), !hasImuFusion);
+      if (hasImuFusion) renderImuTelemetry(await session.imuTelemetry());
       failures = 0;
     } catch (error) {
       failures += 1;

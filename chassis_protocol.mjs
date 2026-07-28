@@ -16,6 +16,7 @@ export const PARAM_SIZE = 64;
 export const ANGLE_AUTOTUNE_SAFETY_TOKEN = 0x45464153;
 export const CAP_MOTOR_BRIDGE = 1 << 5;
 export const CAP_MOTOR_LIMITS = 1 << 6;
+export const CAP_IMU_FUSION = 1 << 7;
 
 export const COMMAND = Object.freeze({
   PING: 0x01,
@@ -32,6 +33,7 @@ export const COMMAND = Object.freeze({
   SET_PARAMS: 0x21,
   SAVE_PARAMS: 0x22,
   GET_MOTOR_LIMITS: 0x23,
+  GET_IMU_TELEMETRY: 0x24,
   ENTER_UPDATE: 0x30,
   ENTER_MOTOR_BRIDGE: 0x31,
   ACK: 0x7e,
@@ -147,6 +149,36 @@ export function decodeParams(payload) {
     leftMotorChannel: version >= 2 ? view.getUint8(52) : 0,
     rightMotorChannel: version >= 2 ? view.getUint8(53) : 2,
     grayActiveHigh: version >= 3 ? view.getUint8(54) === 1 : true,
+  });
+}
+
+export function decodeImuTelemetry(payload) {
+  if (payload.length !== 96) {
+    throw new ProtocolError(`IMU 遥测长度为 ${payload.length}，应为 96`);
+  }
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  const flags = view.getUint32(4, true);
+  const vector = (offset) => Object.freeze([0, 1, 2].map((axis) =>
+    view.getFloat32(offset + axis * 4, true)));
+  return Object.freeze({
+    sampleSequence: view.getUint32(0, true),
+    fusionInitialized: Boolean(flags & (1 << 0)),
+    stationary: Boolean(flags & (1 << 1)),
+    biasTracking: Boolean(flags & (1 << 2)),
+    calibrated: Boolean(flags & (1 << 3)),
+    rawGyroDps: vector(8),
+    gyroDps: vector(20),
+    accelG: vector(32),
+    rollDeg: view.getFloat32(44, true),
+    pitchDeg: view.getFloat32(48, true),
+    yawDeg: view.getFloat32(52, true),
+    temperatureC: view.getFloat32(56, true),
+    gyroBiasDps: vector(60),
+    accelNormG: view.getFloat32(72, true),
+    gyroNoiseRmsDps: view.getFloat32(76, true),
+    accelNoiseRmsG: view.getFloat32(80, true),
+    stationaryTimeS: view.getFloat32(84, true),
+    yawUnwrappedDeg: view.getFloat32(88, true),
   });
 }
 
