@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#ffffff">
     <title>灰度循迹小车底盘</title>
     <link rel="icon" href="data:,">
-    <link rel="stylesheet" href="./chassis.css?v=20260728-2">
+    <link rel="stylesheet" href="./chassis.css?v=20260729-1">
   </head>
   <body class="chassis-console">
     <header class="app-header">
@@ -203,7 +203,7 @@
         </header>
         <form class="parameter-layout" id="parameter-form">
           <fieldset class="drive-mapping">
-            <legend>双轮通道映射</legend>
+            <legend>底盘硬件映射</legend>
             <div class="mapping-controls">
               <label><span>左轮通道</span><select name="leftMotorChannel" aria-label="左轮电机通道">
                 <option value="0">A</option><option value="1">B</option><option value="2">C</option><option value="3">D</option>
@@ -211,7 +211,11 @@
               <label><span>右轮通道</span><select name="rightMotorChannel" aria-label="右轮电机通道">
                 <option value="0">A</option><option value="1">B</option><option value="2" selected>C</option><option value="3">D</option>
               </select></label>
-              <p>仅启用所选两路，其余通道始终保持零速和禁用。更改映射前必须停止双轮。</p>
+              <label class="gray-polarity-control"><span>黑线有效电平</span><select name="grayActiveHigh" aria-label="灰度黑线有效电平">
+                <option value="0" selected>低电平为黑线（当前灰度板）</option>
+                <option value="1">高电平为黑线</option>
+              </select></label>
+              <p>仅启用所选两路电机，其余通道始终保持零速和禁用。灰度极性会同时影响灯珠显示、偏差计算与循迹启动判断。</p>
             </div>
           </fieldset>
           <fieldset>
@@ -308,6 +312,6 @@
     </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-    <script type="module" src="./chassis_app.mjs?v=20260726-6"></script>
+    <script type="module" src="./chassis_app.mjs?v=20260729-1"></script>
   </body>
 </html>

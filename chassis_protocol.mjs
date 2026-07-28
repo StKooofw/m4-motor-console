@@ -11,7 +11,7 @@ export { FrameDecoder, ProtocolError, crc32Msp, encodeFrame };
 
 export const PRODUCT_ID = 0x53414843;
 export const PARAM_MAGIC = 0x50534843;
-export const PARAM_VERSION = 2;
+export const PARAM_VERSION = 3;
 export const PARAM_SIZE = 64;
 export const ANGLE_AUTOTUNE_SAFETY_TOKEN = 0x45464153;
 export const CAP_MOTOR_BRIDGE = 1 << 5;
@@ -125,9 +125,12 @@ export function decodeParams(payload) {
   const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
   const version = view.getUint16(4, true);
   if (view.getUint32(0, true) !== PARAM_MAGIC ||
-      ![1, PARAM_VERSION].includes(version) || view.getUint16(6, true) !== PARAM_SIZE ||
+      ![1, 2, PARAM_VERSION].includes(version) || view.getUint16(6, true) !== PARAM_SIZE ||
       view.getUint32(60, true) !== crc32Msp(payload.subarray(0, 60))) {
     throw new ProtocolError("底盘参数格式或 CRC 错误");
+  }
+  if (version >= 3 && view.getUint8(54) > 1) {
+    throw new ProtocolError("底盘灰度极性参数错误");
   }
   return Object.freeze({
     parameterVersion: version,
@@ -143,6 +146,7 @@ export function decodeParams(payload) {
     commandTimeoutMs: view.getUint32(48, true),
     leftMotorChannel: version >= 2 ? view.getUint8(52) : 0,
     rightMotorChannel: version >= 2 ? view.getUint8(53) : 2,
+    grayActiveHigh: version >= 3 ? view.getUint8(54) === 1 : true,
   });
 }
 
@@ -165,15 +169,23 @@ export function decodeMotorLimits(payload) {
 export function encodeParams(params, version = PARAM_VERSION) {
   const leftMotorChannel = Number(params.leftMotorChannel);
   const rightMotorChannel = Number(params.rightMotorChannel);
+  const grayActiveHigh = Number(params.grayActiveHigh);
   if (!Number.isInteger(leftMotorChannel) || !Number.isInteger(rightMotorChannel) ||
       leftMotorChannel < 0 || leftMotorChannel > 3 ||
       rightMotorChannel < 0 || rightMotorChannel > 3 ||
       leftMotorChannel === rightMotorChannel) {
     throw new ProtocolError("左右轮必须选择两个不同的 A/B/C/D 通道");
   }
-  if (![1, PARAM_VERSION].includes(version)) throw new ProtocolError("不支持的底盘参数版本");
+  if (!Number.isInteger(grayActiveHigh) || grayActiveHigh < 0 ||
+      grayActiveHigh > 1) {
+    throw new ProtocolError("灰度黑线有效电平只能选择低电平或高电平");
+  }
+  if (![1, 2, PARAM_VERSION].includes(version)) throw new ProtocolError("不支持的底盘参数版本");
   if (version === 1 && (leftMotorChannel !== 0 || rightMotorChannel !== 2)) {
     throw new ProtocolError("自选电机通道需要先升级到 CHAS v1.0.3 或更高版本");
+  }
+  if (version < 3 && grayActiveHigh !== 1) {
+    throw new ProtocolError("灰度反相需要先升级到 CHAS v1.0.9 或更高版本");
   }
   const data = new Uint8Array(PARAM_SIZE);
   const view = new DataView(data.buffer);
@@ -194,6 +206,7 @@ export function encodeParams(params, version = PARAM_VERSION) {
     view.setUint8(52, leftMotorChannel);
     view.setUint8(53, rightMotorChannel);
   }
+  if (version >= 3) view.setUint8(54, grayActiveHigh);
   view.setUint32(60, crc32Msp(data.subarray(0, 60)), true);
   return data;
 }

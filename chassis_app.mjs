@@ -3,6 +3,7 @@ import {
   CAP_MOTOR_LIMITS,
   COMMAND,
   FrameDecoder,
+  PARAM_VERSION,
   ProtocolError,
   decodeCommandResponse,
   decodeIdentity,
@@ -12,7 +13,7 @@ import {
   encodeFrame,
   encodeParams,
   makeIntPayload,
-} from "./chassis_protocol.mjs?v=20260726-6";
+} from "./chassis_protocol.mjs?v=20260729-1";
 import {
   LEGACY_SAFE_LIMIT_MRPM,
   applyWheelInputBounds,
@@ -332,7 +333,7 @@ class ChassisSession {
   }
   async setParams(params) {
     await this.transport.request(COMMAND.SET_PARAMS,
-      encodeParams(params, this.parameterVersion || 2));
+      encodeParams(params, this.parameterVersion || PARAM_VERSION));
   }
   async saveParams() { await this.transport.request(COMMAND.SAVE_PARAMS, new Uint8Array(), 1800); }
   async enterUpdate() { await this.transport.request(COMMAND.ENTER_UPDATE, new Uint8Array(), 1800); }
@@ -639,7 +640,7 @@ function populateParams(params) {
   latestParams = params;
   for (const [key, value] of Object.entries(params)) {
     const input = elements.parameter_form.elements.namedItem(key);
-    if (input) input.value = ["commandTimeoutMs", "leftMotorChannel", "rightMotorChannel"].includes(key) ?
+    if (input) input.value = ["commandTimeoutMs", "leftMotorChannel", "rightMotorChannel", "grayActiveHigh"].includes(key) ?
       String(Number(value)) : Number(value).toFixed(4);
   }
   updateChannelOptions();

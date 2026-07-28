@@ -614,8 +614,9 @@ select:focus-visible {
 }
 .parameter-layout legend { padding: 0 8px; font-size: 13px; font-weight: 650; }
 .parameter-layout .drive-mapping { grid-column: span 3; }
-.mapping-controls { display: grid; grid-template-columns: minmax(180px, 240px) minmax(180px, 240px) 1fr; gap: 10px; align-items: center; }
-.mapping-controls p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.mapping-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: center; }
+.mapping-controls p { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.mapping-controls .gray-polarity-control { grid-template-columns: auto minmax(0, 1fr); }
 .parameter-layout .inner-loop { grid-column: span 3; display: flex; align-items: center; justify-content: space-between; }
 .inner-loop p { margin: 0; color: var(--muted); font-size: 12px; }
 .inner-loop a { color: var(--ink); font-size: 12px; font-weight: 700; text-decoration: underline; text-underline-offset: 4px; }
