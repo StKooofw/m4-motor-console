@@ -1,5 +1,6 @@
 import {
   ANGLE_AUTOTUNE_SAFETY_TOKEN,
+  CAP_DIFF_CALIBRATION,
   CAP_IMU_FUSION,
   CAP_MOTOR_LIMITS,
   COMMAND,
@@ -15,7 +16,7 @@ import {
   encodeFrame,
   encodeParams,
   makeIntPayload,
-} from "./chassis_protocol.mjs?v=20260729-2";
+} from "./chassis_protocol.mjs?v=20260729-3";
 import {
   LEGACY_SAFE_LIMIT_MRPM,
   applyWheelInputBounds,
@@ -53,6 +54,8 @@ const elements = Object.fromEntries([
   "read-params-button", "apply-params-button", "save-params-button", "parameter-form",
   "gyro-cal-state", "cal-bias-value", "gyro-still-confirm", "start-gyro-cal-button",
   "angle-cal-state", "candidate-kp", "candidate-ki", "candidate-kd", "calibration-progress",
+  "calibration-stage", "effective-track", "direction-gain", "direction-asymmetry",
+  "step-target", "step-overshoot", "step-settle-time", "motor-feedback-state",
   "imu-mounted-confirm", "ground-confirm", "direction-confirm", "direction-confirm-label", "start-angle-cal-button",
   "abort-cal-button", "apply-candidate-button", "update-file-input", "select-update-file-button",
   "update-file-name", "update-file-size", "update-file-state", "update-image-version",
@@ -73,8 +76,8 @@ const elements = Object.fromEntries([
 
 const stateNames = ["SAFE", "READY", "RUNNING", "FAULT"];
 const modeNames = ["已停止", "循迹", "手动双轮", "角度标定"];
-const calibrationNames = ["待机", "静置", "采样", "静置", "正向阶跃", "回正", "完成", "失败", "已中止"];
-const calibrationResults = ["--", "通过", "检测到移动", "IMU 读取失败", "无有效响应", "回正超时", "已中止"];
+const calibrationNames = ["待机", "陀螺仪静置", "陀螺仪采样", "底盘静置", "旧版正向阶跃", "旧版回正", "完成", "失败", "已中止", "差速轮速稳定", "差速模型采样", "双轮停稳", "角度阶跃准备", "角度阶跃执行"];
+const calibrationResults = ["--", "通过", "检测到移动", "IMU 读取失败", "无有效响应", "阶段超时", "已中止", "电机反馈中断", "电机或编码器故障", "双向差异过大", "差速模型无效", "角度超调过大", "角度无法稳定", "轮速跟踪不合格"];
 const motorChannelNames = ["A", "B", "C", "D"];
 
 let activeSession = null;
@@ -644,8 +647,10 @@ function renderTelemetry(value, legacyImu = false) {
     targetOrientationYaw = value.yawDeg;
   }
   setBadge(elements.control_mode, modeNames[value.mode] || `MODE ${value.mode}`, value.state === 3 ? "fault" : value.mode ? "ok" : "");
-  elements.left_wheel_live.textContent = `${(value.leftTargetMrpm / 1000).toFixed(1)} rpm`;
-  elements.right_wheel_live.textContent = `${(value.rightTargetMrpm / 1000).toFixed(1)} rpm`;
+  const leftActual = value.leftActualMrpm == null ? "--" : (value.leftActualMrpm / 1000).toFixed(1);
+  const rightActual = value.rightActualMrpm == null ? "--" : (value.rightActualMrpm / 1000).toFixed(1);
+  elements.left_wheel_live.textContent = `${(value.leftTargetMrpm / 1000).toFixed(1)} / ${leftActual} rpm`;
+  elements.right_wheel_live.textContent = `${(value.rightTargetMrpm / 1000).toFixed(1)} / ${rightActual} rpm`;
   elements.sensor_failures.textContent = String(value.sensorFailures);
   elements.imu_failures.textContent = String(value.imuFailures);
   elements.motor_failures.textContent = String(value.motorFailures);
@@ -654,6 +659,10 @@ function renderTelemetry(value, legacyImu = false) {
   const resultLabel = value.calibrationState >= 6 ? calibrationResults[value.calibrationResult] || calibrationLabel : calibrationLabel;
   setBadge(elements.gyro_cal_state, resultLabel, value.calibrationBusy ? "busy" : value.calibrationResult === 1 ? "ok" : value.calibrationState >= 7 ? "fault" : "");
   setBadge(elements.angle_cal_state, resultLabel, value.calibrationBusy ? "busy" : value.candidateValid ? "ok" : value.calibrationState >= 7 ? "fault" : "");
+  if (!(activeSession?.identity.capabilities & CAP_DIFF_CALIBRATION) &&
+      !value.calibrationBusy) {
+    setBadge(elements.angle_cal_state, "需升级至 v1.0.18", "fault");
+  }
   if (legacyImu) setBadge(elements.imu_console_state,
     value.imuCalibrated ? "在线 · 已标定" : "在线 · 旧版 IMU",
     value.imuCalibrated ? "ok" : "fault");
@@ -664,6 +673,23 @@ function renderTelemetry(value, legacyImu = false) {
   elements.candidate_kp.textContent = value.candidateValid ? value.candidateAngleKp.toFixed(4) : "--";
   elements.candidate_ki.textContent = value.candidateValid ? value.candidateAngleKi.toFixed(4) : "--";
   elements.candidate_kd.textContent = value.candidateValid ? value.candidateAngleKd.toFixed(4) : "--";
+  elements.calibration_stage.textContent = value.calibrationStageTotal
+    ? `${value.calibrationStageIndex} / ${value.calibrationStageTotal}` : "--";
+  elements.effective_track.textContent = value.effectiveTrackMm > 0
+    ? `${value.effectiveTrackMm.toFixed(1)} mm` : "--";
+  elements.direction_gain.textContent = value.clockwiseGainDpsPerMmS > 0
+    ? `${value.clockwiseGainDpsPerMmS.toFixed(3)} / ${value.counterclockwiseGainDpsPerMmS.toFixed(3)}` : "--";
+  elements.direction_asymmetry.textContent = value.directionAsymmetryPercent == null
+    ? "--" : `${value.directionAsymmetryPercent.toFixed(1)}%`;
+  elements.step_target.textContent = value.stepTargetDeg == null
+    ? "--" : `${value.stepTargetDeg.toFixed(0)}°`;
+  elements.step_overshoot.textContent = value.worstStepOvershootDeg == null
+    ? "--" : `${value.worstStepOvershootDeg.toFixed(2)}°`;
+  elements.step_settle_time.textContent = value.worstStepSettleTimeMs == null
+    ? "--" : `${value.worstStepSettleTimeMs} ms`;
+  setBadge(elements.motor_feedback_state,
+    value.motorStatusValid ? `在线 · 故障 ${hex(value.motorBoardFaults || 0)}` : "无有效反馈",
+    value.motorStatusValid && !value.motorBoardFaults ? "ok" : "fault");
 
   lineHistory.push([value.linePositionMm]);
   yawHistory.push([value.yawDeg, value.yawReferenceDeg]);
@@ -800,8 +826,8 @@ function renderMotorMapping(params) {
   const right = motorChannelNames[params?.rightMotorChannel] || "?";
   elements.left_wheel_label.textContent = `左轮 ${left}`;
   elements.right_wheel_label.textContent = `右轮 ${right}`;
-  elements.left_wheel_status_label.textContent = `左轮 ${left} 目标`;
-  elements.right_wheel_status_label.textContent = `右轮 ${right} 目标`;
+  elements.left_wheel_status_label.textContent = `左轮 ${left} 目标 / 实际`;
+  elements.right_wheel_status_label.textContent = `右轮 ${right} 目标 / 实际`;
   elements.direction_confirm_label.textContent = `左轮 ${left}、右轮 ${right} 的正值均朝前`;
 }
 function applyWheelInputLimits(params = latestParams ||
@@ -830,6 +856,7 @@ function populateParams(params) {
 function updateControlAvailability() {
   const online = Boolean(activeSession) && !updateBusy;
   const motorLimitsReady = Boolean(latestMotorLimits?.synced && latestParams);
+  const differentialCalibrationReady = Boolean(activeSession?.identity.capabilities & CAP_DIFF_CALIBRATION);
   const calibrationBusy = Boolean(latestTelemetry?.calibrationBusy);
   elements.estop_button.disabled = !online;
   elements.clear_estop_button.disabled = !online || calibrationBusy;
@@ -847,7 +874,8 @@ function updateControlAvailability() {
   elements.imu_console_cal_button.disabled = !online || calibrationBusy || !elements.imu_console_still_confirm.checked;
   const angleConfirmed = elements.imu_mounted_confirm.checked && elements.ground_confirm.checked && elements.direction_confirm.checked;
   elements.start_angle_cal_button.disabled = !online || calibrationBusy ||
-    !motorLimitsReady || !latestTelemetry?.imuCalibrated || !angleConfirmed;
+    !motorLimitsReady || !latestTelemetry?.imuCalibrated || !angleConfirmed ||
+    !differentialCalibrationReady;
   elements.abort_cal_button.disabled = !online || !calibrationBusy;
   elements.apply_candidate_button.disabled = !online || calibrationBusy || !latestTelemetry?.candidateValid;
   setUpdateControls();

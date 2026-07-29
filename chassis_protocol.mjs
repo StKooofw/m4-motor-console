@@ -17,6 +17,7 @@ export const ANGLE_AUTOTUNE_SAFETY_TOKEN = 0x45464153;
 export const CAP_MOTOR_BRIDGE = 1 << 5;
 export const CAP_MOTOR_LIMITS = 1 << 6;
 export const CAP_IMU_FUSION = 1 << 7;
+export const CAP_DIFF_CALIBRATION = 1 << 8;
 
 export const COMMAND = Object.freeze({
   PING: 0x01,
@@ -80,9 +81,12 @@ export function decodeIdentity(payload) {
 }
 
 export function decodeTelemetry(payload) {
-  if (payload.length !== 100) throw new ProtocolError(`底盘遥测长度为 ${payload.length}，应为 100`);
+  if (![100, 148].includes(payload.length)) {
+    throw new ProtocolError(`底盘遥测长度为 ${payload.length}，应为 100 或 148`);
+  }
   const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
   const flags = view.getUint8(7);
+  const extended = payload.length === 148;
   return Object.freeze({
     uptimeMs: view.getUint32(0, true),
     state: view.getUint8(4),
@@ -119,6 +123,22 @@ export function decodeTelemetry(payload) {
     candidateAngleKd: view.getFloat32(88, true),
     peakGyroDps: view.getFloat32(92, true),
     responseTimeMs: view.getUint32(96, true),
+    differentialCalibrationTelemetry: extended,
+    effectiveTrackMm: extended ? view.getFloat32(100, true) : null,
+    clockwiseGainDpsPerMmS: extended ? view.getFloat32(104, true) : null,
+    counterclockwiseGainDpsPerMmS: extended ? view.getFloat32(108, true) : null,
+    directionAsymmetryPercent: extended ? view.getFloat32(112, true) : null,
+    stepTargetDeg: extended ? view.getFloat32(116, true) : null,
+    worstStepOvershootDeg: extended ? view.getFloat32(120, true) : null,
+    worstStepSettleTimeMs: extended ? view.getUint32(124, true) : null,
+    leftActualMrpm: extended ? view.getInt32(128, true) : null,
+    rightActualMrpm: extended ? view.getInt32(132, true) : null,
+    leftOutputPermille: extended ? view.getInt16(136, true) : null,
+    rightOutputPermille: extended ? view.getInt16(138, true) : null,
+    motorBoardFaults: extended ? view.getUint32(140, true) : null,
+    calibrationStageIndex: extended ? view.getUint8(144) : 0,
+    calibrationStageTotal: extended ? view.getUint8(145) : 0,
+    motorStatusValid: extended ? view.getUint8(146) === 1 : false,
   });
 }
 

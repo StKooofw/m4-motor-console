@@ -115,8 +115,8 @@
             <button class="button secondary" id="stop-tracking-button" type="button" disabled>停止循迹</button>
           </div>
           <div class="wheel-status-grid">
-            <article><span id="left-wheel-status-label">左轮 A 目标</span><strong id="left-wheel-live">-- rpm</strong><small>正值朝前</small></article>
-            <article><span id="right-wheel-status-label">右轮 C 目标</span><strong id="right-wheel-live">-- rpm</strong><small>正值朝前</small></article>
+            <article><span id="left-wheel-status-label">左轮 A 目标 / 实际</span><strong id="left-wheel-live">-- rpm</strong><small>正值朝前</small></article>
+            <article><span id="right-wheel-status-label">右轮 C 目标 / 实际</span><strong id="right-wheel-live">-- rpm</strong><small>正值朝前</small></article>
             <article><span>传感器故障</span><strong id="sensor-failures">--</strong><small>累计</small></article>
             <article><span>陀螺仪故障</span><strong id="imu-failures">--</strong><small>累计</small></article>
             <article><span>电机链路故障</span><strong id="motor-failures">--</strong><small>累计</small></article>
@@ -270,6 +270,16 @@
               <div><span>Kd 候选</span><strong id="candidate-kd">--</strong></div>
             </div>
             <progress id="calibration-progress" max="100" value="0"></progress>
+            <div class="candidate-grid calibration-model-grid">
+              <div><span>当前阶段</span><strong id="calibration-stage">--</strong></div>
+              <div><span>等效轮距</span><strong id="effective-track">--</strong></div>
+              <div><span>正/反增益</span><strong id="direction-gain">--</strong></div>
+              <div><span>双向差异</span><strong id="direction-asymmetry">--</strong></div>
+              <div><span>阶跃目标</span><strong id="step-target">--</strong></div>
+              <div><span>最坏超调</span><strong id="step-overshoot">--</strong></div>
+              <div><span>最坏稳定时间</span><strong id="step-settle-time">--</strong></div>
+              <div><span>电机板反馈</span><strong class="badge" id="motor-feedback-state">--</strong></div>
+            </div>
             <label class="confirm-row"><input id="imu-mounted-confirm" type="checkbox"><span>ICM45686 已牢固安装</span></label>
             <label class="confirm-row"><input id="ground-confirm" type="checkbox"><span>两轮落地，车体周围区域空旷</span></label>
             <label class="confirm-row"><input id="direction-confirm" type="checkbox"><span id="direction-confirm-label">左轮 A、右轮 C 的正值均朝前</span></label>
