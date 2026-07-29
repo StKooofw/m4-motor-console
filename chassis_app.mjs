@@ -33,6 +33,10 @@ import {
   validateApplicationImage,
 } from "./chassis_firmware_update.mjs";
 import * as THREE from "./vendor/three.module.min.js";
+import {
+  WirelessCalibrationSession,
+  parseWirelessReply,
+} from "./chassis_wireless_console.mjs?v=20260729-1";
 
 const $ = (id) => document.getElementById(id);
 const elements = Object.fromEntries([
@@ -61,7 +65,10 @@ const elements = Object.fromEntries([
   "imu-orientation-canvas", "imu-model-roll", "imu-model-pitch", "imu-model-yaw", "imu-console-cal-state",
   "imu-console-progress", "imu-console-progress-value", "imu-console-peak", "imu-console-response",
   "imu-console-zero-button", "imu-console-still-confirm",
-  "imu-console-cal-button", "toast",
+  "imu-console-cal-button", "wireless-state", "wireless-connect-button", "wireless-token",
+  "wireless-status-button", "wireless-gyro-button", "wireless-arm-button",
+  "wireless-confirm-button", "wireless-abort-button", "wireless-estop-button",
+  "wireless-log", "toast",
 ].map((id) => [id.replaceAll("-", "_"), $(id)]));
 
 const stateNames = ["SAFE", "READY", "RUNNING", "FAULT"];
@@ -78,6 +85,10 @@ let latestMotorLimits = null;
 let pollingToken = 0;
 let updateBusy = false;
 let connectionBusy = false;
+let wirelessSession = null;
+let wirelessConnectionBusy = false;
+let wirelessConfirmToken = null;
+const wirelessLogLines = [];
 let selectedUpdate = null;
 let toastTimer = null;
 const lineHistory = [];
@@ -112,6 +123,111 @@ function toast(message, kind = "info") {
 function setConnection(state, label) {
   elements.connection_state.dataset.state = state;
   elements.connection_label.textContent = label;
+}
+
+function setWirelessState(label, state = "") {
+  elements.wireless_state.textContent = label;
+  elements.wireless_state.dataset.state = state;
+}
+
+function appendWirelessLog(direction, line) {
+  wirelessLogLines.push(`${direction} ${line}`);
+  if (wirelessLogLines.length > 7) wirelessLogLines.shift();
+  elements.wireless_log.textContent = wirelessLogLines.join("\n");
+}
+
+function updateWirelessAvailability() {
+  const supported = "serial" in navigator && window.isSecureContext;
+  const online = Boolean(wirelessSession) && !wirelessConnectionBusy;
+  const gyroConfirmed = elements.gyro_still_confirm.checked
+    || elements.imu_console_still_confirm.checked;
+  const angleConfirmed = elements.imu_mounted_confirm.checked
+    && elements.ground_confirm.checked && elements.direction_confirm.checked;
+  elements.wireless_connect_button.disabled = !supported || wirelessConnectionBusy;
+  elements.wireless_connect_button.textContent = wirelessSession ? "断开无线" : "连接无线";
+  elements.wireless_status_button.disabled = !online;
+  elements.wireless_gyro_button.disabled = !online || !gyroConfirmed;
+  elements.wireless_arm_button.disabled = !online || !angleConfirmed;
+  elements.wireless_confirm_button.disabled = !online || !wirelessConfirmToken;
+  elements.wireless_abort_button.disabled = !online;
+  elements.wireless_estop_button.disabled = !online;
+  elements.wireless_token.textContent = wirelessConfirmToken || "--";
+}
+
+function handleWirelessLine(line) {
+  appendWirelessLog("RX", line);
+  const reply = parseWirelessReply(line);
+  if (reply.kind === "armed") {
+    wirelessConfirmToken = reply.token;
+    setWirelessState("等待确认", "busy");
+  } else if (line === "OK ANGLE START" || line === "OK GYRO START"
+      || reply.kind === "progress") {
+    wirelessConfirmToken = null;
+    setWirelessState("标定中", "busy");
+  } else if (reply.kind === "done") {
+    wirelessConfirmToken = null;
+    setWirelessState(reply.ok ? "标定完成" : "标定失败", reply.ok ? "ok" : "fault");
+  } else if (reply.kind === "error") {
+    if (line.includes("ARM") || line.includes("TOKEN") || line.includes("NOT_ARMED")) {
+      wirelessConfirmToken = null;
+    }
+    setWirelessState("命令被拒绝", "fault");
+  } else if (reply.kind === "ok") {
+    setWirelessState("无线在线", "ok");
+  }
+  updateWirelessAvailability();
+}
+
+async function endWirelessSession() {
+  const session = wirelessSession;
+  wirelessSession = null;
+  wirelessConfirmToken = null;
+  if (session) await session.close();
+  setWirelessState("未连接");
+  updateWirelessAvailability();
+}
+
+async function connectWirelessPort(port) {
+  if (wirelessConnectionBusy) return;
+  wirelessConnectionBusy = true;
+  setWirelessState("正在连接", "busy");
+  updateWirelessAvailability();
+  const session = new WirelessCalibrationSession(port);
+  try {
+    session.onLine = handleWirelessLine;
+    session.onUnexpectedClose = async () => {
+      if (wirelessSession === session) {
+        toast("无线串口已断开", "error");
+        await endWirelessSession();
+      }
+    };
+    await session.open();
+    wirelessSession = session;
+    wirelessLogLines.length = 0;
+    appendWirelessLog("SYS", `${session.adapterLabel} · 115200-8-N-1`);
+    setWirelessState("无线在线", "ok");
+  } catch (error) {
+    try { await session.close(); } catch { /* open may have failed */ }
+    setWirelessState("连接失败", "fault");
+    throw error;
+  } finally {
+    wirelessConnectionBusy = false;
+    updateWirelessAvailability();
+  }
+}
+
+async function sendWirelessCommand(command) {
+  if (!wirelessSession) throw new ProtocolError("无线串口尚未连接");
+  appendWirelessLog("TX", command);
+  await wirelessSession.sendCommand(command);
+}
+
+async function runWirelessCommand(command) {
+  try {
+    await sendWirelessCommand(command);
+  } catch (error) {
+    toast(error.message, "error");
+  }
 }
 
 class SerialTransport {
@@ -735,6 +851,7 @@ function updateControlAvailability() {
   elements.abort_cal_button.disabled = !online || !calibrationBusy;
   elements.apply_candidate_button.disabled = !online || calibrationBusy || !latestTelemetry?.candidateValid;
   setUpdateControls();
+  updateWirelessAvailability();
 }
 
 async function pollLoop(session, token) {
@@ -1024,6 +1141,35 @@ function bindEvents() {
     await session.setParams(params);
     populateParams(await session.getParams());
   }, "角度环候选参数已写入 RAM"));
+  elements.wireless_connect_button.addEventListener("click", async () => {
+    if (wirelessSession) { await endWirelessSession(); return; }
+    try { await connectWirelessPort(await navigator.serial.requestPort()); }
+    catch (error) { if (error.name !== "NotFoundError") toast(error.message, "error"); }
+  });
+  elements.wireless_status_button.addEventListener("click", () => runWirelessCommand("STATUS"));
+  elements.wireless_gyro_button.addEventListener("click", () => runWirelessCommand("GYRO"));
+  elements.wireless_arm_button.addEventListener("click", async () => {
+    wirelessConfirmToken = null;
+    updateWirelessAvailability();
+    await runWirelessCommand("ARM ANGLE");
+  });
+  elements.wireless_confirm_button.addEventListener("click", async () => {
+    const token = wirelessConfirmToken;
+    if (!token) return;
+    wirelessConfirmToken = null;
+    updateWirelessAvailability();
+    await runWirelessCommand(`CONFIRM ANGLE ${token}`);
+  });
+  elements.wireless_abort_button.addEventListener("click", async () => {
+    wirelessConfirmToken = null;
+    updateWirelessAvailability();
+    await runWirelessCommand("ABORT");
+  });
+  elements.wireless_estop_button.addEventListener("click", async () => {
+    wirelessConfirmToken = null;
+    updateWirelessAvailability();
+    await runWirelessCommand("ESTOP");
+  });
   elements.select_update_file_button.addEventListener("click", () => elements.update_file_input.click());
   elements.update_file_input.addEventListener("change", () => selectUpdateFile(elements.update_file_input.files?.[0]));
   elements.update_confirm.addEventListener("change", setUpdateControls);
@@ -1046,10 +1192,12 @@ function initialize() {
   const supported = "serial" in navigator && window.isSecureContext;
   elements.support_banner.hidden = supported;
   elements.connect_button.disabled = !supported;
+  updateWirelessAvailability();
   setUpdateControls();
   registerSerialReleaseHandler(async () => {
-    if (connectionBusy || updateBusy) return false;
+    if (connectionBusy || wirelessConnectionBusy || updateBusy) return false;
     if (activeSession) await endSession(true);
+    if (wirelessSession) await endWirelessSession();
     return true;
   });
 }
