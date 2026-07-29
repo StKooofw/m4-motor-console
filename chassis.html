@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#ffffff">
     <title>灰度循迹小车底盘</title>
     <link rel="icon" href="data:,">
-    <link rel="stylesheet" href="./chassis.css?v=20260729-3">
+    <link rel="stylesheet" href="./chassis.css?v=20260729-4">
   </head>
   <body class="chassis-console">
     <header class="app-header">
@@ -292,12 +292,60 @@
 
           <section class="panel wireless-panel">
             <header class="panel-header">
-              <div><span class="panel-kicker">WIRELESS UART3</span><h2>无线标定控制</h2></div>
+              <div><span class="panel-kicker">WIRELESS UART3</span><h2>无线行车与标定</h2></div>
               <div class="wireless-header-actions">
                 <span class="badge" id="wireless-state">未连接</span>
                 <button class="button secondary" id="wireless-connect-button" type="button">连接无线</button>
               </div>
             </header>
+            <div class="wireless-drive-band">
+              <div class="wireless-section-header">
+                <div><span>LINE FOLLOWING</span><strong>无线发车</strong></div>
+                <span class="badge" id="wireless-drive-state">等待连接</span>
+              </div>
+              <label class="confirm-row wireless-run-confirm"><input id="wireless-run-safety-confirm" type="checkbox"><span>赛道已清空，灰度在线，随时可停车</span></label>
+              <div class="wireless-drive-controls">
+                <div class="wireless-token"><span>发车确认令牌</span><strong id="wireless-run-token">--</strong></div>
+                <div class="button-row wireless-buttons">
+                  <button class="button primary" id="wireless-run-arm-button" type="button" disabled>预备循迹</button>
+                  <button class="button green" id="wireless-run-confirm-button" type="button" disabled>确认发车</button>
+                  <button class="button secondary" id="wireless-run-stop-button" type="button" disabled>停车</button>
+                </div>
+              </div>
+            </div>
+            <div class="wireless-tune-band">
+              <div class="wireless-section-header">
+                <div><span>RAM / FLASH</span><strong>无线底盘调参</strong></div>
+                <span class="badge" id="wireless-tune-state">未读取</span>
+              </div>
+              <form class="wireless-tune-form" id="wireless-tune-form">
+                <div class="wireless-tune-group">
+                  <strong>行驶参数</strong>
+                  <label><span>基础速度</span><input id="wireless-base-speed" type="number" min="0" max="1000" step="1" inputmode="decimal"><small>mm/s</small></label>
+                  <label><span>最高速度</span><input id="wireless-max-speed" type="number" min="10" max="1500" step="1" inputmode="decimal"><small>mm/s</small></label>
+                  <label><span>最大差速</span><input id="wireless-max-steer" type="number" min="0" max="1000" step="1" inputmode="decimal"><small>mm/s</small></label>
+                  <button class="button secondary" id="wireless-apply-drive-button" type="button" disabled>写入 RAM</button>
+                </div>
+                <div class="wireless-tune-group">
+                  <strong>灰度位置 PID</strong>
+                  <label><span>Kp</span><input id="wireless-line-kp" type="number" min="0" max="20" step="0.001" inputmode="decimal"></label>
+                  <label><span>Ki</span><input id="wireless-line-ki" type="number" min="0" max="20" step="0.001" inputmode="decimal"></label>
+                  <label><span>Kd</span><input id="wireless-line-kd" type="number" min="0" max="20" step="0.001" inputmode="decimal"></label>
+                  <button class="button secondary" id="wireless-apply-line-button" type="button" disabled>写入 RAM</button>
+                </div>
+                <div class="wireless-tune-group">
+                  <strong>航向角 PID</strong>
+                  <label><span>Kp</span><input id="wireless-angle-kp" type="number" min="0" max="100" step="0.001" inputmode="decimal"></label>
+                  <label><span>Ki</span><input id="wireless-angle-ki" type="number" min="0" max="100" step="0.001" inputmode="decimal"></label>
+                  <label><span>Kd</span><input id="wireless-angle-kd" type="number" min="0" max="100" step="0.001" inputmode="decimal"></label>
+                  <button class="button secondary" id="wireless-apply-angle-button" type="button" disabled>写入 RAM</button>
+                </div>
+              </form>
+              <div class="button-row wireless-tune-actions">
+                <button class="button secondary" id="wireless-read-tune-button" type="button" disabled>读取参数</button>
+                <button class="button primary" id="wireless-save-tune-button" type="button" disabled>保存到 Flash</button>
+              </div>
+            </div>
             <div class="wireless-run-band">
               <div class="wireless-run-summary">
                 <span class="badge" id="wireless-run-state">未运行</span>
@@ -373,6 +421,6 @@
     </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-    <script type="module" src="./chassis_app.mjs?v=20260729-5"></script>
+    <script type="module" src="./chassis_app.mjs?v=20260729-6"></script>
   </body>
 </html>

@@ -227,6 +227,7 @@ capabilities:u32 | protocol_version:u32
 | 6 | CM4M Flash 速度上限同步 |
 | 7 | ICM45686 六轴姿态融合与独立遥测 |
 | 8 | 三档双向差速辨识与六段角度阶跃标定 |
+| 9 | UART3 低流量无线发车与 CHAS 运行参数/PID 调整 |
 
 新增可选功能时优先分配 capability bit。页面必须先检查能力再显示为可操作状态；旧固件缺少
 能力时禁用控件并明确提示最低版本，不能点击后才用“参数无效”兜底。
@@ -418,6 +419,21 @@ BroadcastChannel("m4-console-serial-handoff-v1")
 
 页面卸载不是可靠的安全机制。固件通信超时仍是最终停机保障；网页主动断开前也应尽力发送零目标
 和禁用/急停，再关闭 reader、writer 和 port。
+
+### CHAS 独立 UART3 无线口
+
+CHAS v1.0.24 起，PB2/PB3 的 UART3 是与 CH340 主口和 CM4M 板间链路分离的
+`115200-8-N-1` ASCII 白名单。无线 `STATUS` 返回 `VER`、`WCAP` 和 `RUN`；网页只有在
+`WCAP` bit0/bit1 存在时才分别开放发车和调参，旧固件仍可保留原角度标定功能。
+
+无线发车必须 `ARM RUN -> CONFIRM RUN <8 hex>` 两步完成。确认后网页每 200 ms 发送不回显的
+`KEEP RUN`，固件租约固定为 600 ms；页面断开会主动尝试 `STOP RUN`，但真正的安全兜底始终是
+板端租约和模块故障停车。重连只读取状态，不得自动恢复运行或复用旧令牌。
+
+`GET TUNE`、`SET DRIVE`、`SET LINE`、`SET ANGLE` 和 `SAVE TUNE` 只操作 CHAS 64 字节运行
+参数中的行驶参数、灰度 PID 和航向 PID。写参数仅允许停车，`SET` 只改 RAM，`SAVE TUNE`
+显式持久化；CM4M 200 字节参数、直接轮速、解除急停、通道映射、灰度极性和升级均不经该
+白名单。运行期间不发送实时遥测，只有状态请求、命令结果和标定阶段/低频样本返回。
 
 ### CHAS 到 CM4M 透传
 

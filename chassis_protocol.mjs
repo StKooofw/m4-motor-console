@@ -18,6 +18,7 @@ export const CAP_MOTOR_BRIDGE = 1 << 5;
 export const CAP_MOTOR_LIMITS = 1 << 6;
 export const CAP_IMU_FUSION = 1 << 7;
 export const CAP_DIFF_CALIBRATION = 1 << 8;
+export const CAP_WIRELESS_RUN_TUNING = 1 << 9;
 
 export function normalizeHeadingDegrees(angle) {
   if (!Number.isFinite(angle)) return Number.NaN;

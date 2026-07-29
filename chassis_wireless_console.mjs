@@ -1,4 +1,7 @@
 export const WIRELESS_BAUD_RATE = 115200;
+export const WIRELESS_RUN_HEARTBEAT_MS = 200;
+export const WIRELESS_CAP_RUN = 1 << 0;
+export const WIRELESS_CAP_TUNE = 1 << 1;
 
 export class WirelessConsoleError extends Error {}
 
@@ -46,17 +49,55 @@ function pairField(fields, name) {
 }
 
 export function isAllowedWirelessCommand(command) {
-  return ["STATUS", "GYRO", "ARM ANGLE", "ABORT", "ESTOP"].includes(command)
-    || /^CONFIRM ANGLE [0-9A-F]{8}$/.test(command);
+  const decimal = "[+]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)";
+  return [
+    "STATUS", "GYRO", "ARM ANGLE", "ARM RUN", "KEEP RUN", "STOP RUN",
+    "GET TUNE", "SAVE TUNE", "ABORT", "ESTOP",
+  ].includes(command)
+    || /^CONFIRM (?:ANGLE|RUN) [0-9A-F]{8}$/.test(command)
+    || new RegExp(`^SET (?:DRIVE|LINE|ANGLE) ${decimal} ${decimal} ${decimal}$`).test(command);
+}
+
+function finiteInRange(value, minimum, maximum, name) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < minimum || number > maximum) {
+    throw new WirelessConsoleError(`${name} 必须在 ${minimum} 到 ${maximum} 之间`);
+  }
+  return number;
+}
+
+export function makeWirelessTuneCommand(group, values) {
+  const normalized = String(group).trim().toUpperCase();
+  let ranges;
+  let names;
+  if (normalized === "DRIVE") {
+    ranges = [[0, 1000], [10, 1500], [0, 1000]];
+    names = ["基础速度", "最高速度", "最大差速"];
+  } else if (normalized === "LINE") {
+    ranges = [[0, 20], [0, 20], [0, 20]];
+    names = ["灰度 Kp", "灰度 Ki", "灰度 Kd"];
+  } else if (normalized === "ANGLE") {
+    ranges = [[0, 100], [0, 100], [0, 100]];
+    names = ["角度 Kp", "角度 Ki", "角度 Kd"];
+  } else {
+    throw new WirelessConsoleError("未知无线调参分组");
+  }
+  if (!Array.isArray(values) || values.length !== 3) {
+    throw new WirelessConsoleError("无线调参需要三个数值");
+  }
+  const checked = values.map((value, index) => finiteInRange(
+    value, ranges[index][0], ranges[index][1], names[index]));
+  return `SET ${normalized} ${checked.map((value) => value.toFixed(4)).join(" ")}`;
 }
 
 export function parseWirelessReply(line) {
-  const armed = /^OK ARMED ANGLE TOKEN=([0-9A-F]{8}) EXPIRES=(\d+)$/.exec(line);
+  const armed = /^OK ARMED (ANGLE|RUN) TOKEN=([0-9A-F]{8}) EXPIRES=(\d+)$/.exec(line);
   if (armed) {
     return Object.freeze({
       kind: "armed",
-      token: armed[1],
-      expiresMs: Number(armed[2]),
+      armKind: armed[1].toLowerCase(),
+      token: armed[2],
+      expiresMs: Number(armed[3]),
     });
   }
   if (line.startsWith("OK STATUS ")) {
@@ -67,6 +108,10 @@ export function parseWirelessReply(line) {
       return otherReply();
     }
     const [stageIndex, stageTotal] = pairField(fields, "STAGE");
+    const firmwareVersion = /^[0-9A-F]{8}$/.test(fields.VER || "")
+      ? Number.parseInt(fields.VER, 16) : null;
+    const wirelessCapabilities = /^[0-9A-F]{2}$/.test(fields.WCAP || "")
+      ? Number.parseInt(fields.WCAP, 16) : 0;
     return Object.freeze({
       kind: "status",
       state: values.STATE,
@@ -77,7 +122,25 @@ export function parseWirelessReply(line) {
       result: values.RESULT,
       stageIndex,
       stageTotal,
+      firmwareVersion,
+      wirelessCapabilities,
+      runActive: fields.RUN === "1",
     });
+  }
+  if (line.startsWith("TUNE ")) {
+    const group = /^(?:TUNE) (DRIVE|LINE|ANGLE) /.exec(line)?.[1]?.toLowerCase();
+    const fields = parseFields(line);
+    if (group === "drive") {
+      const values = requiredNumberFields(fields, ["BASE", "MAX", "STEER"]);
+      return values ? Object.freeze({ kind: "tune", group,
+        values: Object.freeze([values.BASE, values.MAX, values.STEER]) }) : otherReply();
+    }
+    if (group === "line" || group === "angle") {
+      const values = requiredNumberFields(fields, ["KP", "KI", "KD"]);
+      return values ? Object.freeze({ kind: "tune", group,
+        values: Object.freeze([values.KP, values.KI, values.KD]) }) : otherReply();
+    }
+    return otherReply();
   }
   if (line.startsWith("PROGRESS ")) {
     const fields = parseFields(line);
@@ -188,6 +251,16 @@ export function parseWirelessReply(line) {
   if (started) {
     return Object.freeze({ kind: "started", calibrationKind: started[1].toLowerCase() });
   }
+  const runStarted = /^OK RUN START LEASE=(\d+)$/.exec(line);
+  if (runStarted) {
+    return Object.freeze({ kind: "run-started", leaseMs: Number(runStarted[1]) });
+  }
+  if (line === "OK RUN STOP") return Object.freeze({ kind: "run-stopped", reason: "command" });
+  const runStopped = /^STOP RUN REASON=(TIMEOUT|FAULT)$/.exec(line);
+  if (runStopped) return Object.freeze({ kind: "run-stopped", reason: runStopped[1].toLowerCase() });
+  if (line === "OK TUNE RAM") return Object.freeze({ kind: "tune-applied" });
+  if (line === "OK TUNE SAVED") return Object.freeze({ kind: "tune-saved" });
+  if (line === "OK TUNE END") return Object.freeze({ kind: "tune-end" });
   if (line.startsWith("ERR ")) {
     return Object.freeze({ kind: "error", code: line.slice(4) });
   }
