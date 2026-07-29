@@ -16,7 +16,8 @@ import {
   encodeFrame,
   encodeParams,
   makeIntPayload,
-} from "./chassis_protocol.mjs?v=20260729-3";
+  normalizeHeadingDegrees,
+} from "./chassis_protocol.mjs?v=20260729-4";
 import {
   LEGACY_SAFE_LIMIT_MRPM,
   applyWheelInputBounds,
@@ -601,11 +602,13 @@ function symmetricChartRange(rows, minimumAbs, maximumAbs) {
 }
 
 function renderTelemetry(value, legacyImu = false) {
+  const yawHeading = normalizeHeadingDegrees(value.yawDeg);
+  const referenceHeading = normalizeHeadingDegrees(value.yawReferenceDeg);
   latestTelemetry = value;
   elements.uptime_value.textContent = durationLabel(value.uptimeMs);
   elements.state_value.textContent = stateNames[value.state] || `STATE ${value.state}`;
   elements.line_error.textContent = `${value.linePositionMm.toFixed(2)} mm`;
-  elements.yaw_value.textContent = `${value.yawDeg.toFixed(2)}°`;
+  elements.yaw_value.textContent = `${yawHeading.toFixed(2)}°`;
   elements.angle_error.textContent = `${value.angleErrorDeg.toFixed(2)}°`;
   elements.gyro_value.textContent = `${value.gyroZDps.toFixed(2)} °/s`;
   elements.steer_value.textContent = `${value.steerMmS.toFixed(1)} mm/s`;
@@ -616,14 +619,14 @@ function renderTelemetry(value, legacyImu = false) {
     cell.classList.toggle("is-active", Boolean(value.activeGrayBits & (1 << Number(cell.dataset.sensor))));
   });
   setBadge(elements.imu_state, value.imuCalibrated ? "已标定" : "未标定", value.imuCalibrated ? "ok" : "fault");
-  elements.yaw_needle.style.transform = `rotate(${value.yawDeg}deg)`;
-  elements.yaw_dial_value.textContent = `${value.yawDeg.toFixed(1)}°`;
-  elements.yaw_reference.textContent = `${value.yawReferenceDeg.toFixed(2)}°`;
+  elements.yaw_needle.style.transform = `rotate(${yawHeading}deg)`;
+  elements.yaw_dial_value.textContent = `${yawHeading.toFixed(1)}°`;
+  elements.yaw_reference.textContent = `${referenceHeading.toFixed(2)}°`;
   elements.imu_bias.textContent = `${value.imuBiasDps.toFixed(4)} °/s`;
   elements.cal_bias_value.textContent = `${value.imuBiasDps.toFixed(4)} °/s`;
   elements.peak_gyro.textContent = `${value.peakGyroDps.toFixed(2)} °/s`;
   elements.response_time.textContent = `${value.responseTimeMs} ms`;
-  elements.imu_console_reference.textContent = `${value.yawReferenceDeg.toFixed(2)}°`;
+  elements.imu_console_reference.textContent = `${referenceHeading.toFixed(2)}°`;
   elements.imu_console_error.textContent = `${value.angleErrorDeg.toFixed(2)}°`;
   elements.imu_console_bias.textContent = `${value.imuBiasDps.toFixed(4)} °/s`;
   elements.imu_console_failures.textContent = String(value.imuFailures);
@@ -634,17 +637,17 @@ function renderTelemetry(value, legacyImu = false) {
     elements.imu_console_raw_gyro.textContent = `${value.gyroZDps.toFixed(2)} °/s`;
     elements.imu_console_roll.textContent = "--°";
     elements.imu_console_pitch.textContent = "--°";
-    elements.imu_console_yaw.textContent = `${value.yawDeg.toFixed(2)}°`;
+    elements.imu_console_yaw.textContent = `${yawHeading.toFixed(2)}°`;
     elements.imu_console_temperature.textContent = "-- °C";
     elements.imu_console_stationary.textContent = "旧固件未提供";
     elements.imu_console_accel_norm.textContent = "-- g";
     elements.imu_console_noise.textContent = "-- °/s";
     elements.imu_model_roll.textContent = "0.0°";
     elements.imu_model_pitch.textContent = "0.0°";
-    elements.imu_model_yaw.textContent = `${value.yawDeg.toFixed(1)}°`;
+    elements.imu_model_yaw.textContent = `${yawHeading.toFixed(1)}°`;
     targetOrientationRoll = 0;
     targetOrientationPitch = 0;
-    targetOrientationYaw = value.yawDeg;
+    targetOrientationYaw = yawHeading;
   }
   setBadge(elements.control_mode, modeNames[value.mode] || `MODE ${value.mode}`, value.state === 3 ? "fault" : value.mode ? "ok" : "");
   const leftActual = value.leftActualMrpm == null ? "--" : (value.leftActualMrpm / 1000).toFixed(1);
@@ -692,7 +695,7 @@ function renderTelemetry(value, legacyImu = false) {
     value.motorStatusValid && !value.motorBoardFaults ? "ok" : "fault");
 
   lineHistory.push([value.linePositionMm]);
-  yawHistory.push([value.yawDeg, value.yawReferenceDeg]);
+  yawHistory.push([yawHeading, referenceHeading]);
   if (legacyImu) gyroHistory.push([value.gyroZDps, value.gyroZDps]);
   angleErrorHistory.push([value.angleErrorDeg]);
   if (lineHistory.length > 160) lineHistory.shift();
@@ -704,12 +707,13 @@ function renderTelemetry(value, legacyImu = false) {
 }
 
 function renderImuTelemetry(value) {
+  const yawHeading = normalizeHeadingDegrees(value.yawDeg);
   latestImuTelemetry = value;
   elements.imu_console_gyro.textContent = `${value.gyroDps[2].toFixed(2)} °/s`;
   elements.imu_console_raw_gyro.textContent = `${value.rawGyroDps[2].toFixed(2)} °/s`;
   elements.imu_console_roll.textContent = `${value.rollDeg.toFixed(2)}°`;
   elements.imu_console_pitch.textContent = `${value.pitchDeg.toFixed(2)}°`;
-  elements.imu_console_yaw.textContent = `${value.yawDeg.toFixed(2)}°`;
+  elements.imu_console_yaw.textContent = `${yawHeading.toFixed(2)}°`;
   elements.imu_console_temperature.textContent = `${value.temperatureC.toFixed(1)} °C`;
   elements.imu_console_accel_norm.textContent = `${value.accelNormG.toFixed(3)} g`;
   elements.imu_console_noise.textContent = `${value.gyroNoiseRmsDps.toFixed(3)} °/s`;
@@ -718,10 +722,10 @@ function renderImuTelemetry(value) {
     value.stationary ? "静止" : "运动";
   elements.imu_model_roll.textContent = `${value.rollDeg.toFixed(1)}°`;
   elements.imu_model_pitch.textContent = `${value.pitchDeg.toFixed(1)}°`;
-  elements.imu_model_yaw.textContent = `${value.yawDeg.toFixed(1)}°`;
+  elements.imu_model_yaw.textContent = `${yawHeading.toFixed(1)}°`;
   targetOrientationRoll = value.rollDeg;
   targetOrientationPitch = value.pitchDeg;
-  targetOrientationYaw = value.yawDeg;
+  targetOrientationYaw = yawHeading;
   setBadge(elements.imu_console_state,
     value.calibrated ? "六轴融合 · 已标定" : "六轴融合 · 待标定",
     value.fusionInitialized ? (value.calibrated ? "ok" : "busy") : "fault");
@@ -732,18 +736,17 @@ function renderImuTelemetry(value) {
 
 function renderCharts() {
   const gyroRange = symmetricChartRange(gyroHistory, 5, 1000);
-  const yawRange = symmetricChartRange(yawHistory, 45, 360);
   const errorRange = symmetricChartRange(angleErrorHistory, 5, 180);
   elements.gyro_chart_range.textContent = `±${gyroRange} °/s`;
   elements.imu_error_chart_range.textContent = `±${errorRange}°`;
   drawChart(elements.line_chart, lineHistory, ["#246746"], 65);
-  drawChart(elements.yaw_chart, yawHistory, ["#26343d", "#b33a42"], yawRange);
+  drawChart(elements.yaw_chart, yawHistory, ["#26343d", "#b33a42"], 360, 0, 360);
   drawChart(elements.gyro_chart, gyroHistory, ["#9aa3a7", "#2f64d6"], gyroRange);
-  drawChart(elements.imu_yaw_chart, yawHistory, ["#26343d", "#b33a42"], yawRange);
+  drawChart(elements.imu_yaw_chart, yawHistory, ["#26343d", "#b33a42"], 360, 0, 360);
   drawChart(elements.imu_error_chart, angleErrorHistory, ["#aa3037"], errorRange);
 }
 
-function drawChart(canvas, rows, colors, fixedAbs) {
+function drawChart(canvas, rows, colors, fixedAbs, minimum = -fixedAbs, maximum = fixedAbs) {
   const bounds = canvas.getBoundingClientRect();
   if (bounds.width < 1 || bounds.height < 1) return;
   const ratio = window.devicePixelRatio || 1;
@@ -769,7 +772,8 @@ function drawChart(canvas, rows, colors, fixedAbs) {
     context.beginPath();
     rows.forEach((row, index) => {
       const x = index / 159 * width;
-      const y = height / 2 - (row[series] / fixedAbs) * (height * .44);
+      const y = height * .06 +
+        ((maximum - row[series]) / (maximum - minimum)) * (height * .88);
       if (index === 0) context.moveTo(x, y); else context.lineTo(x, y);
     });
     context.stroke();

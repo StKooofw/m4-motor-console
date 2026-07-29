@@ -19,6 +19,13 @@ export const CAP_MOTOR_LIMITS = 1 << 6;
 export const CAP_IMU_FUSION = 1 << 7;
 export const CAP_DIFF_CALIBRATION = 1 << 8;
 
+export function normalizeHeadingDegrees(angle) {
+  if (!Number.isFinite(angle)) return Number.NaN;
+  const normalized = angle % 360;
+  if (normalized === 0) return 0;
+  return normalized < 0 ? normalized + 360 : normalized;
+}
+
 export const COMMAND = Object.freeze({
   PING: 0x01,
   GET_TELEMETRY: 0x02,
