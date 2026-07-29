@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#ffffff">
     <title>灰度循迹小车底盘</title>
     <link rel="icon" href="data:,">
-    <link rel="stylesheet" href="./chassis.css?v=20260729-2">
+    <link rel="stylesheet" href="./chassis.css?v=20260729-3">
   </head>
   <body class="chassis-console">
     <header class="app-header">
@@ -298,6 +298,25 @@
                 <button class="button secondary" id="wireless-connect-button" type="button">连接无线</button>
               </div>
             </header>
+            <div class="wireless-run-band">
+              <div class="wireless-run-summary">
+                <span class="badge" id="wireless-run-state">未运行</span>
+                <strong id="wireless-run-detail">等待设备状态</strong>
+              </div>
+              <div class="wireless-stage-grid" id="wireless-stage-grid" aria-label="12 段标定进度"></div>
+            </div>
+            <div class="wireless-metric-grid">
+              <div><span>等效轮距</span><strong id="wireless-model-track">--</strong></div>
+              <div><span>正 / 反增益</span><strong id="wireless-model-gain">--</strong></div>
+              <div><span>双向差异</span><strong id="wireless-model-asymmetry">--</strong></div>
+              <div><span>峰值 / 响应</span><strong id="wireless-model-response">--</strong></div>
+              <div><span>候选 PID</span><strong id="wireless-candidate-pid">--</strong></div>
+              <div><span>目标 / 航向</span><strong id="wireless-step-angle">--</strong></div>
+              <div><span>Z 轴角速度</span><strong id="wireless-step-gyro">--</strong></div>
+              <div><span>左轮目标 / 实际</span><strong id="wireless-left-wheel">--</strong></div>
+              <div><span>右轮目标 / 实际</span><strong id="wireless-right-wheel">--</strong></div>
+              <div><span>饱和 / 轮速误差</span><strong id="wireless-step-quality">--</strong></div>
+            </div>
             <div class="wireless-console-layout">
               <div class="wireless-command-area">
                 <div class="wireless-token"><span>角度确认令牌</span><strong id="wireless-token">--</strong></div>
@@ -354,6 +373,6 @@
     </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-    <script type="module" src="./chassis_app.mjs?v=20260729-3"></script>
+    <script type="module" src="./chassis_app.mjs?v=20260729-5"></script>
   </body>
 </html>

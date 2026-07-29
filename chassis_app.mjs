@@ -38,7 +38,8 @@ import * as THREE from "./vendor/three.module.min.js";
 import {
   WirelessCalibrationSession,
   parseWirelessReply,
-} from "./chassis_wireless_console.mjs?v=20260729-1";
+  wirelessCalibrationResultText,
+} from "./chassis_wireless_console.mjs?v=20260729-3";
 
 const $ = (id) => document.getElementById(id);
 const elements = Object.fromEntries([
@@ -72,7 +73,11 @@ const elements = Object.fromEntries([
   "imu-console-cal-button", "wireless-state", "wireless-connect-button", "wireless-token",
   "wireless-status-button", "wireless-gyro-button", "wireless-arm-button",
   "wireless-confirm-button", "wireless-abort-button", "wireless-estop-button",
-  "wireless-log", "toast",
+  "wireless-run-state", "wireless-run-detail", "wireless-stage-grid",
+  "wireless-model-track", "wireless-model-gain", "wireless-model-asymmetry",
+  "wireless-model-response", "wireless-candidate-pid", "wireless-step-angle",
+  "wireless-step-gyro", "wireless-left-wheel", "wireless-right-wheel",
+  "wireless-step-quality", "wireless-log", "toast",
 ].map((id) => [id.replaceAll("-", "_"), $(id)]));
 
 const stateNames = ["SAFE", "READY", "RUNNING", "FAULT"];
@@ -80,6 +85,10 @@ const modeNames = ["已停止", "循迹", "手动双轮", "角度标定"];
 const calibrationNames = ["待机", "陀螺仪静置", "陀螺仪采样", "底盘静置", "旧版正向阶跃", "旧版回正", "完成", "失败", "已中止", "差速轮速稳定", "差速模型采样", "双轮停稳", "角度阶跃准备", "角度阶跃执行"];
 const calibrationResults = ["--", "通过", "检测到移动", "IMU 读取失败", "无有效响应", "阶段超时", "已中止", "电机反馈中断", "电机或编码器故障", "双向差异过大", "差速模型无效", "角度超调过大", "角度无法稳定", "轮速跟踪不合格"];
 const motorChannelNames = ["A", "B", "C", "D"];
+const wirelessStageNames = [
+  "差速 +1", "差速 -1", "差速 +2", "差速 -2", "差速 +3", "差速 -3",
+  "+30°", "-30°", "+60°", "-60°", "+90°", "-90°",
+];
 
 let activeSession = null;
 let latestTelemetry = null;
@@ -92,6 +101,11 @@ let connectionBusy = false;
 let wirelessSession = null;
 let wirelessConnectionBusy = false;
 let wirelessConfirmToken = null;
+let wirelessDeviceStatus = null;
+let wirelessCalibrationBusy = false;
+let wirelessStageIndex = 0;
+let wirelessRunFinished = false;
+let wirelessLastResult = 0;
 const wirelessLogLines = [];
 let selectedUpdate = null;
 let toastTimer = null;
@@ -136,8 +150,168 @@ function setWirelessState(label, state = "") {
 
 function appendWirelessLog(direction, line) {
   wirelessLogLines.push(`${direction} ${line}`);
-  if (wirelessLogLines.length > 7) wirelessLogLines.shift();
+  if (wirelessLogLines.length > 120) wirelessLogLines.shift();
   elements.wireless_log.textContent = wirelessLogLines.join("\n");
+  elements.wireless_log.scrollTop = elements.wireless_log.scrollHeight;
+}
+
+function setWirelessRun(label, detail, state = "") {
+  setBadge(elements.wireless_run_state, label, state);
+  elements.wireless_run_detail.textContent = detail;
+}
+
+function createWirelessStageTracker() {
+  const fragment = document.createDocumentFragment();
+  wirelessStageNames.forEach((name, index) => {
+    const item = document.createElement("div");
+    const number = document.createElement("span");
+    const label = document.createElement("strong");
+    item.dataset.stage = String(index + 1);
+    number.textContent = String(index + 1).padStart(2, "0");
+    label.textContent = name;
+    item.append(number, label);
+    fragment.append(item);
+  });
+  elements.wireless_stage_grid.replaceChildren(fragment);
+}
+
+function renderWirelessStages(stageIndex = 0, outcome = "busy") {
+  wirelessStageIndex = stageIndex;
+  for (const item of elements.wireless_stage_grid.children) {
+    const stage = Number(item.dataset.stage);
+    delete item.dataset.state;
+    if (outcome === "ok") item.dataset.state = "done";
+    else if (stage < stageIndex) item.dataset.state = "done";
+    else if (stage === stageIndex && outcome === "fault") item.dataset.state = "fault";
+    else if (stage === stageIndex && outcome === "busy") item.dataset.state = "active";
+  }
+}
+
+function resetWirelessAngleRun() {
+  wirelessStageIndex = 0;
+  wirelessRunFinished = false;
+  wirelessLastResult = 0;
+  renderWirelessStages(0, "idle");
+  for (const key of ["wireless_model_track", "wireless_model_gain",
+    "wireless_model_asymmetry", "wireless_model_response",
+    "wireless_candidate_pid", "wireless_step_angle", "wireless_step_gyro",
+    "wireless_left_wheel", "wireless_right_wheel", "wireless_step_quality"]) {
+    elements[key].textContent = "--";
+  }
+  setWirelessRun("未运行", "等待设备状态");
+}
+
+function wirelessDeviceReady(requireImu = true) {
+  return wirelessDeviceStatus?.state === 1 && wirelessDeviceStatus.readyMask === 0x07
+    && (!requireImu || wirelessDeviceStatus.imuCalibrated);
+}
+
+function renderWirelessReply(reply) {
+  if (reply.kind === "status") {
+    wirelessDeviceStatus = reply;
+    const modulesReady = reply.state === 1 && reply.readyMask === 0x07;
+    setWirelessState(modulesReady ? "无线就绪" : "设备未就绪",
+      modulesReady ? "ok" : "fault");
+    if (!wirelessCalibrationBusy && !wirelessRunFinished && !wirelessConfirmToken) {
+      setWirelessRun(modulesReady && reply.imuCalibrated ? "设备就绪" : "等待前置条件",
+        `模块 ${reply.readyMask.toString(16).toUpperCase().padStart(2, "0")} · IMU ${reply.imuCalibrated ? "已标定" : "待标定"}`,
+        modulesReady && reply.imuCalibrated ? "ok" : "busy");
+    }
+    return;
+  }
+  if (reply.kind === "armed") {
+    wirelessConfirmToken = reply.token;
+    wirelessCalibrationBusy = false;
+    setWirelessState("等待确认", "busy");
+    setWirelessRun("等待二次确认", `令牌 ${reply.token} · ${reply.expiresMs / 1000}s`, "busy");
+    return;
+  }
+  if (reply.kind === "started") {
+    wirelessConfirmToken = null;
+    wirelessCalibrationBusy = true;
+    wirelessRunFinished = false;
+    setWirelessState("标定中", "busy");
+    setWirelessRun(reply.calibrationKind === "angle" ? "角度标定中" : "静态零偏中",
+      reply.calibrationKind === "angle" ? "等待第 1/12 段" : "正在采集静止样本", "busy");
+    return;
+  }
+  if (reply.kind === "progress") {
+    wirelessConfirmToken = null;
+    wirelessCalibrationBusy = true;
+    wirelessRunFinished = false;
+    setWirelessState("标定中", "busy");
+    if (reply.calibrationKind === 2 && reply.stageIndex > 0) {
+      renderWirelessStages(reply.stageIndex, "busy");
+      const stageName = wirelessStageNames[reply.stageIndex - 1] || `阶段 ${reply.stageIndex}`;
+      setWirelessRun(`${reply.stageIndex} / ${reply.stageTotal}`, `${stageName} · ${reply.progress}% · 目标 ${reply.targetDeg.toFixed(0)}°`, "busy");
+    } else {
+      setWirelessRun("静态零偏中", `${reply.progress}%`, "busy");
+    }
+    return;
+  }
+  if (reply.kind === "model") {
+    elements.wireless_model_track.textContent = `${reply.trackMm.toFixed(1)} mm`;
+    elements.wireless_model_gain.textContent = `${reply.clockwiseGain.toFixed(4)} / ${reply.counterclockwiseGain.toFixed(4)}`;
+    elements.wireless_model_asymmetry.textContent = `${reply.asymmetryPercent.toFixed(2)}%`;
+    elements.wireless_model_response.textContent = `${reply.peakGyroDps.toFixed(1)} °/s · ${reply.responseTimeMs} ms`;
+    return;
+  }
+  if (reply.kind === "candidate") {
+    elements.wireless_candidate_pid.textContent = `${reply.kp.toFixed(4)} / ${reply.ki.toFixed(4)} / ${reply.kd.toFixed(4)}`;
+    return;
+  }
+  if (reply.kind === "sample") {
+    elements.wireless_step_angle.textContent = `${reply.targetDeg.toFixed(1)}° / ${reply.yawDeg.toFixed(1)}°`;
+    elements.wireless_step_gyro.textContent = `${reply.gyroDps.toFixed(2)} °/s`;
+    elements.wireless_left_wheel.textContent = `${(reply.leftTargetMrpm / 1000).toFixed(1)} / ${(reply.leftActualMrpm / 1000).toFixed(1)} rpm`;
+    elements.wireless_right_wheel.textContent = `${(reply.rightTargetMrpm / 1000).toFixed(1)} / ${(reply.rightActualMrpm / 1000).toFixed(1)} rpm`;
+    return;
+  }
+  if (reply.kind === "step-diagnostic") {
+    const saturation = reply.controlCount ? 100 * reply.saturationCount / reply.controlCount : 0;
+    elements.wireless_step_angle.textContent = `${reply.targetDeg.toFixed(1)}° / ${reply.yawDeg.toFixed(1)}°`;
+    elements.wireless_step_gyro.textContent = `${reply.gyroDps.toFixed(2)} °/s`;
+    elements.wireless_step_quality.textContent = `${saturation.toFixed(1)}% / ${(reply.wheelErrorRatio * 100).toFixed(1)}%`;
+    if (wirelessRunFinished) {
+      setWirelessRun(`第 ${wirelessStageIndex}/12 段失败`,
+        `${wirelessCalibrationResultText(wirelessLastResult)} · 超调 ${reply.overshootDeg.toFixed(1)}° · 上升 ${reply.riseTimeMs} ms`, "fault");
+    }
+    return;
+  }
+  if (reply.kind === "done") {
+    wirelessConfirmToken = null;
+    wirelessCalibrationBusy = false;
+    wirelessRunFinished = true;
+    wirelessLastResult = reply.result;
+    if (reply.calibrationKind === "gyro" && reply.ok && wirelessDeviceStatus) {
+      wirelessDeviceStatus = { ...wirelessDeviceStatus, imuCalibrated: true };
+    }
+    if (reply.kp != null) {
+      elements.wireless_candidate_pid.textContent = `${reply.kp.toFixed(4)} / ${(reply.ki || 0).toFixed(4)} / ${(reply.kd || 0).toFixed(4)}`;
+    }
+    if (reply.trackMm != null) elements.wireless_model_track.textContent = `${reply.trackMm.toFixed(1)} mm`;
+    if (reply.calibrationKind === "angle") {
+      renderWirelessStages(wirelessStageIndex || 12, reply.ok ? "ok" : "fault");
+    }
+    setWirelessState(reply.ok ? "标定完成" : "标定失败", reply.ok ? "ok" : "fault");
+    const stageText = reply.calibrationKind === "angle" && !reply.ok && wirelessStageIndex
+      ? `第 ${wirelessStageIndex}/12 段` : reply.calibrationKind === "angle" ? "12/12 段" : "静态零偏";
+    setWirelessRun(reply.resultText, `${stageText} · RESULT ${reply.result}`,
+      reply.ok ? "ok" : "fault");
+    return;
+  }
+  if (reply.kind === "error") {
+    wirelessCalibrationBusy = false;
+    if (reply.code.includes("ARM") || reply.code.includes("TOKEN") ||
+        reply.code.includes("NOT_ARMED")) wirelessConfirmToken = null;
+    setWirelessState("命令被拒绝", "fault");
+    setWirelessRun("命令被拒绝", reply.code.replaceAll("_", " "), "fault");
+    return;
+  }
+  if (reply.kind === "ok") {
+    wirelessCalibrationBusy = false;
+    setWirelessState("无线在线", "ok");
+  }
 }
 
 function updateWirelessAvailability() {
@@ -147,13 +321,15 @@ function updateWirelessAvailability() {
     || elements.imu_console_still_confirm.checked;
   const angleConfirmed = elements.imu_mounted_confirm.checked
     && elements.ground_confirm.checked && elements.direction_confirm.checked;
-  elements.wireless_connect_button.disabled = !supported || wirelessConnectionBusy;
+  const angleReady = wirelessDeviceReady(true);
+  elements.wireless_connect_button.disabled = !supported || wirelessConnectionBusy || wirelessCalibrationBusy;
   elements.wireless_connect_button.textContent = wirelessSession ? "断开无线" : "连接无线";
-  elements.wireless_status_button.disabled = !online;
-  elements.wireless_gyro_button.disabled = !online || !gyroConfirmed;
-  elements.wireless_arm_button.disabled = !online || !angleConfirmed;
-  elements.wireless_confirm_button.disabled = !online || !wirelessConfirmToken;
-  elements.wireless_abort_button.disabled = !online;
+  elements.wireless_status_button.disabled = !online || wirelessCalibrationBusy;
+  elements.wireless_gyro_button.disabled = !online || wirelessCalibrationBusy || !gyroConfirmed;
+  elements.wireless_arm_button.disabled = !online || wirelessCalibrationBusy ||
+    Boolean(wirelessConfirmToken) || !angleConfirmed || !angleReady;
+  elements.wireless_confirm_button.disabled = !online || wirelessCalibrationBusy || !wirelessConfirmToken;
+  elements.wireless_abort_button.disabled = !online || (!wirelessCalibrationBusy && !wirelessConfirmToken);
   elements.wireless_estop_button.disabled = !online;
   elements.wireless_token.textContent = wirelessConfirmToken || "--";
 }
@@ -161,24 +337,7 @@ function updateWirelessAvailability() {
 function handleWirelessLine(line) {
   appendWirelessLog("RX", line);
   const reply = parseWirelessReply(line);
-  if (reply.kind === "armed") {
-    wirelessConfirmToken = reply.token;
-    setWirelessState("等待确认", "busy");
-  } else if (line === "OK ANGLE START" || line === "OK GYRO START"
-      || reply.kind === "progress") {
-    wirelessConfirmToken = null;
-    setWirelessState("标定中", "busy");
-  } else if (reply.kind === "done") {
-    wirelessConfirmToken = null;
-    setWirelessState(reply.ok ? "标定完成" : "标定失败", reply.ok ? "ok" : "fault");
-  } else if (reply.kind === "error") {
-    if (line.includes("ARM") || line.includes("TOKEN") || line.includes("NOT_ARMED")) {
-      wirelessConfirmToken = null;
-    }
-    setWirelessState("命令被拒绝", "fault");
-  } else if (reply.kind === "ok") {
-    setWirelessState("无线在线", "ok");
-  }
+  renderWirelessReply(reply);
   updateWirelessAvailability();
 }
 
@@ -186,6 +345,8 @@ async function endWirelessSession() {
   const session = wirelessSession;
   wirelessSession = null;
   wirelessConfirmToken = null;
+  wirelessDeviceStatus = null;
+  wirelessCalibrationBusy = false;
   if (session) await session.close();
   setWirelessState("未连接");
   updateWirelessAvailability();
@@ -207,9 +368,13 @@ async function connectWirelessPort(port) {
     };
     await session.open();
     wirelessSession = session;
+    wirelessDeviceStatus = null;
+    wirelessCalibrationBusy = false;
     wirelessLogLines.length = 0;
+    resetWirelessAngleRun();
     appendWirelessLog("SYS", `${session.adapterLabel} · 115200-8-N-1`);
     setWirelessState("无线在线", "ok");
+    await sendWirelessCommand("STATUS");
   } catch (error) {
     try { await session.close(); } catch { /* open may have failed */ }
     setWirelessState("连接失败", "fault");
@@ -1182,6 +1347,7 @@ function bindEvents() {
   elements.wireless_gyro_button.addEventListener("click", () => runWirelessCommand("GYRO"));
   elements.wireless_arm_button.addEventListener("click", async () => {
     wirelessConfirmToken = null;
+    resetWirelessAngleRun();
     updateWirelessAvailability();
     await runWirelessCommand("ARM ANGLE");
   });
@@ -1215,6 +1381,8 @@ function bindEvents() {
 
 function initialize() {
   createSensors();
+  createWirelessStageTracker();
+  resetWirelessAngleRun();
   bindEvents();
   try { initializeOrientationView(); }
   catch (error) { console.error("3D IMU 初始化失败", error); }

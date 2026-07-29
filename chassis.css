@@ -644,6 +644,64 @@ select:focus-visible {
 .wireless-panel { grid-column: 1 / -1; }
 .wireless-header-actions { display: flex; align-items: center; gap: 8px; }
 .wireless-header-actions .button { min-height: 34px; padding: 0 12px; }
+.wireless-run-band { padding: 16px 18px; border-top: 1px solid var(--line-soft); }
+.wireless-run-summary {
+  min-height: 32px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.wireless-run-summary strong { min-width: 0; font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.wireless-stage-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--line-soft);
+}
+.wireless-stage-grid > div {
+  min-width: 0;
+  min-height: 58px;
+  padding: 8px 5px;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 5px;
+  background: #fff;
+  color: var(--muted);
+  text-align: center;
+}
+.wireless-stage-grid span { font: 650 9px ui-monospace, "Cascadia Mono", monospace; }
+.wireless-stage-grid strong { font-size: 9px; font-weight: 650; line-height: 1.25; }
+.wireless-stage-grid > div[data-state="done"] { background: #e8f3ed; color: var(--green); }
+.wireless-stage-grid > div[data-state="active"] { background: var(--ink); color: #fff; }
+.wireless-stage-grid > div[data-state="fault"] { background: #f8e8e9; color: var(--red); }
+.wireless-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 1px;
+  border-top: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--line-soft);
+}
+.wireless-metric-grid > div {
+  min-width: 0;
+  min-height: 76px;
+  padding: 13px 15px;
+  display: grid;
+  align-content: center;
+  gap: 7px;
+  background: #fff;
+}
+.wireless-metric-grid span { color: var(--muted); font-size: 9px; }
+.wireless-metric-grid strong {
+  min-width: 0;
+  font: 650 12px/1.35 ui-monospace, "Cascadia Mono", monospace;
+  overflow-wrap: anywhere;
+}
 .wireless-console-layout { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(300px, .85fr); border-top: 1px solid var(--line-soft); }
 .wireless-command-area { min-width: 0; padding: 16px 18px 18px; }
 .wireless-token { min-height: 42px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
@@ -652,8 +710,8 @@ select:focus-visible {
 .wireless-buttons { padding: 10px 0 0 !important; }
 .wireless-log {
   min-width: 0;
-  min-height: 138px;
-  max-height: 172px;
+  min-height: 190px;
+  max-height: 260px;
   padding: 15px 17px;
   overflow: auto;
   border-left: 1px solid var(--line-soft);
@@ -721,6 +779,8 @@ progress { width: calc(100% - 36px); height: 9px; margin: 18px 18px 4px; accent-
   .parameter-layout .inner-loop { grid-column: span 2; }
   .mapping-controls { grid-template-columns: 1fr 1fr; }
   .mapping-controls p { grid-column: 1 / -1; }
+  .wireless-stage-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .wireless-metric-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 @media (max-width: 780px) {
@@ -793,6 +853,9 @@ progress { width: calc(100% - 36px); height: 9px; margin: 18px 18px 4px; accent-
   .candidate-grid div { border-left: 0; border-top: 1px solid var(--line-soft); }
   .candidate-grid div:first-child { border-top: 0; }
   .wireless-header-actions { align-items: flex-end; flex-direction: column; }
+  .wireless-run-summary { align-items: flex-start; flex-direction: column; }
+  .wireless-stage-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .wireless-metric-grid { grid-template-columns: 1fr 1fr; }
   .wireless-console-layout { grid-template-columns: 1fr; }
   .wireless-log { border-top: 1px solid var(--line-soft); border-left: 0; }
   .button { min-height: 44px; }
