@@ -645,8 +645,10 @@ select:focus-visible {
 .wireless-header-actions { display: flex; align-items: center; gap: 8px; }
 .wireless-header-actions .button { min-height: 34px; padding: 0 12px; }
 .wireless-drive-band,
+.wireless-diagnostic-band,
 .wireless-tune-band { border-top: 1px solid var(--line-soft); }
 .wireless-drive-band { padding: 16px 18px 18px; background: #f6faf7; }
+.wireless-diagnostic-band { padding: 16px 18px 18px; background: #f8f9fa; }
 .wireless-tune-band { padding: 16px 18px 18px; }
 .wireless-section-header {
   min-height: 36px;
@@ -667,6 +669,24 @@ select:focus-visible {
   gap: 20px;
 }
 .wireless-drive-controls .wireless-buttons { justify-content: flex-end; }
+.wireless-gray-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--line-soft);
+}
+.wireless-gray-grid > div { min-width: 0; min-height: 64px; padding: 11px 12px; display: grid; align-content: center; gap: 6px; background: #fff; }
+.wireless-gray-grid span { color: var(--muted); font-size: 9px; }
+.wireless-gray-grid strong { min-width: 0; font: 650 11px/1.35 ui-monospace, "Cascadia Mono", monospace; overflow-wrap: anywhere; }
+.wireless-gray-grid strong[data-state="ok"] { color: var(--green); }
+.wireless-gray-grid strong[data-state="fault"] { color: var(--red); }
+.wireless-diagnostic-controls { margin-top: 12px; display: flex; align-items: end; justify-content: flex-end; gap: 8px; }
+.wireless-diagnostic-controls label { min-width: 190px; display: grid; gap: 5px; color: var(--muted); font-size: 9px; }
+.wireless-diagnostic-controls select { min-height: 36px; padding: 0 9px; }
 .wireless-tune-form {
   margin-top: 14px;
   display: grid;
@@ -828,6 +848,7 @@ progress { width: calc(100% - 36px); height: 9px; margin: 18px 18px 4px; accent-
   .mapping-controls { grid-template-columns: 1fr 1fr; }
   .mapping-controls p { grid-column: 1 / -1; }
   .wireless-stage-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .wireless-gray-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .wireless-metric-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .wireless-tune-form { grid-template-columns: 1fr 1fr; }
   .wireless-tune-group:last-child { grid-column: 1 / -1; }
@@ -906,6 +927,10 @@ progress { width: calc(100% - 36px); height: 9px; margin: 18px 18px 4px; accent-
   .wireless-section-header { align-items: flex-start; }
   .wireless-drive-controls { grid-template-columns: 1fr; gap: 6px; }
   .wireless-drive-controls .wireless-buttons { justify-content: flex-start; }
+  .wireless-gray-grid { grid-template-columns: 1fr 1fr; }
+  .wireless-diagnostic-controls { align-items: stretch; flex-direction: column; }
+  .wireless-diagnostic-controls label,
+  .wireless-diagnostic-controls .button { width: 100%; }
   .wireless-tune-form { grid-template-columns: 1fr; }
   .wireless-tune-group:last-child { grid-column: auto; }
   .wireless-run-summary { align-items: flex-start; flex-direction: column; }

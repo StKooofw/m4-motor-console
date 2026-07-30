@@ -313,6 +313,28 @@
                 </div>
               </div>
             </div>
+            <div class="wireless-diagnostic-band">
+              <div class="wireless-section-header">
+                <div><span>GRAY / TRACE</span><strong>灰度门禁与行车诊断</strong></div>
+                <span class="badge" id="wireless-trace-state">等待连接</span>
+              </div>
+              <div class="wireless-gray-grid">
+                <div><span>原始位</span><strong id="wireless-gray-raw">--</strong></div>
+                <div><span>有效位</span><strong id="wireless-gray-active">--</strong></div>
+                <div><span>有效路数</span><strong id="wireless-gray-count">--</strong></div>
+                <div><span>黑线极性</span><strong id="wireless-gray-polarity">--</strong></div>
+                <div><span>位置偏差</span><strong id="wireless-gray-position">--</strong></div>
+                <div><span>启动判定</span><strong id="wireless-gray-verdict">--</strong></div>
+              </div>
+              <div class="wireless-diagnostic-controls">
+                <label><span>黑线有效电平</span><select id="wireless-gray-polarity-input" aria-label="无线灰度黑线有效电平">
+                  <option value="0">低电平为黑线</option>
+                  <option value="1">高电平为黑线</option>
+                </select></label>
+                <button class="button secondary" id="wireless-apply-gray-button" type="button" disabled>写入极性到 RAM</button>
+                <button class="button secondary" id="wireless-trace-button" type="button" disabled>开启诊断流</button>
+              </div>
+            </div>
             <div class="wireless-tune-band">
               <div class="wireless-section-header">
                 <div><span>RAM / FLASH</span><strong>无线底盘调参</strong></div>
@@ -421,6 +443,6 @@
     </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-    <script type="module" src="./chassis_app.mjs?v=20260729-6"></script>
+    <script type="module" src="./chassis_app.mjs?v=20260730-1"></script>
   </body>
 </html>

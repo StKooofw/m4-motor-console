@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#ffffff">
+    <title>车载平衡滚球闭环</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="./ballbeam.css?v=20260730-2">
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="app-header__inner">
+        <a class="product-switch-link" href="./index.html">产品选择</a>
+        <a class="brand" href="./index.html" aria-label="返回产品选择">
+          <span class="brand-mark">BB</span>
+          <span><strong>BALL BEAM</strong><small>K230 VISION · QD4310</small></span>
+        </a>
+        <div class="header-controls">
+          <div class="connection-state" id="connection-state" data-state="offline">
+            <span class="status-dot"></span><span id="connection-label">未连接</span>
+          </div>
+          <button class="button primary" id="connect-button" type="button">连接 K230</button>
+          <button class="button secondary" id="clear-fault-button" type="button" disabled>清除锁存</button>
+          <button class="button danger" id="estop-button" type="button" disabled>急停</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="app-shell">
+      <div class="support-banner" id="support-banner" hidden>当前浏览器不能使用 Web Serial。</div>
+
+      <header class="workspace-header">
+        <div class="workspace-title">
+          <span class="kicker">H TASK · CLOSED LOOP</span>
+          <h1>车载平衡滚球</h1>
+          <span class="workspace-interface">K230 UART1 · 115200 · QD4310 UART2</span>
+        </div>
+        <dl class="identity-strip">
+          <div><dt>控制器</dt><dd id="device-name">等待连接</dd></div>
+          <div><dt>固件</dt><dd id="firmware-version">--</dd></div>
+          <div><dt>视觉</dt><dd id="vision-state">--</dd></div>
+          <div><dt>状态</dt><dd id="state-value">离线</dd></div>
+        </dl>
+      </header>
+
+      <div class="workspace">
+        <nav class="tabs" role="tablist" aria-label="滚球闭环工作区">
+          <span class="tabs-label">工作区</span>
+          <button class="tab is-active" type="button" data-view="monitor" role="tab" aria-selected="true"><span>01</span>闭环监控</button>
+          <button class="tab" type="button" data-view="vision" role="tab" aria-selected="false"><span>02</span>视觉与控制</button>
+          <button class="tab" type="button" data-view="safety" role="tab" aria-selected="false"><span>03</span>安全限制</button>
+          <button class="tab" type="button" data-view="experiment" role="tab" aria-selected="false"><span>04</span>RL 实验</button>
+        </nav>
+
+        <div class="workspace-content">
+          <section class="view is-active" data-panel="monitor">
+            <div class="metric-band">
+              <div><span>钢球位置</span><strong id="ball-position">-- cm</strong></div>
+              <div><span>目标位置</span><strong id="target-position">-- cm</strong></div>
+              <div><span>球速</span><strong id="ball-velocity">-- cm/s</strong></div>
+              <div><span>摆杆目标</span><strong id="beam-angle">--°</strong></div>
+              <div><span>电机角度</span><strong id="motor-angle">--°</strong></div>
+              <div><span>电机电流</span><strong id="motor-current">-- A</strong></div>
+            </div>
+
+            <div class="monitor-layout">
+              <section class="panel beam-panel">
+                <header class="panel-header">
+                  <div><span class="panel-kicker">POSITION OBSERVATION</span><h2>摆杆状态</h2></div>
+                  <span class="badge" id="tracking-badge">等待视觉</span>
+                </header>
+                <div class="beam-stage" aria-label="钢球在 25 厘米摆杆上的位置">
+                  <div class="beam-rule"><i id="target-marker"></i><b id="ball-marker"></b></div>
+                  <div class="beam-scale"><span>-12</span><span>-5</span><span>O</span><span>+5</span><span>+12 cm</span></div>
+                </div>
+                <div class="chart-heading"><span>位置 / 目标</span><span id="chart-window">0 samples</span></div>
+                <canvas class="trace-chart" id="position-chart" width="960" height="230" aria-label="钢球位置与目标曲线"></canvas>
+              </section>
+
+              <aside class="panel status-panel">
+                <header class="panel-header">
+                  <div><span class="panel-kicker">CONTROL STATE</span><h2>闭环状态</h2></div>
+                  <span class="badge" id="control-state-badge">离线</span>
+                </header>
+                <dl class="value-list">
+                  <div><dt>控制模式</dt><dd id="control-mode">--</dd></div>
+                  <div><dt>视觉新鲜度</dt><dd id="vision-age">-- ms</dd></div>
+                  <div><dt>QDrive 新鲜度</dt><dd id="qdrive-age">-- ms</dd></div>
+                  <div><dt>QD4310 速度</dt><dd id="motor-speed">-- rpm</dd></div>
+                  <div><dt>网页租约</dt><dd id="lease-age">-- ms</dd></div>
+                  <div><dt>故障锁存</dt><dd id="fault-code">--</dd></div>
+                </dl>
+              </aside>
+            </div>
+
+            <section class="control-band">
+              <div class="target-control">
+                <label><span>目标位置</span><input id="target-input" type="number" min="-12" max="12" step="0.1" value="0"><em>cm</em></label>
+                <button class="button secondary" id="send-target-button" type="button" disabled>设置目标</button>
+                <button class="button secondary" id="center-button" type="button" disabled>中心 O</button>
+                <button class="button primary" id="sequence-button" type="button" disabled>O → +5 → -5</button>
+              </div>
+              <div class="arm-control">
+                <div class="confirmations">
+                  <label><input id="confirm-limits" type="checkbox"><span>实体限位已安装</span></label>
+                  <label><input id="confirm-ground" type="checkbox"><span>3.3 V UART 已共地</span></label>
+                  <label><input id="confirm-clear" type="checkbox"><span>机构行程内无人手</span></label>
+                </div>
+                <button class="button primary green" id="arm-button" type="button" disabled>使能闭环</button>
+                <button class="button secondary" id="disarm-button" type="button" disabled>失能</button>
+              </div>
+            </section>
+          </section>
+
+          <section class="view" data-panel="vision">
+            <header class="section-heading">
+              <div><span class="kicker">CALIBRATION / BASELINE</span><h2>位置标定与基线控制</h2></div>
+              <button class="button primary" id="apply-vision-button" type="button" disabled>写入 K230 RAM</button>
+            </header>
+            <div class="form-layout">
+              <fieldset>
+                <legend>摆杆端点</legend>
+                <div class="input-grid four">
+                  <label><span>左端 X</span><input id="left-x" type="number" step="1" value="90"><em>px</em></label>
+                  <label><span>左端 Y</span><input id="left-y" type="number" step="1" value="250"><em>px</em></label>
+                  <label><span>右端 X</span><input id="right-x" type="number" step="1" value="710"><em>px</em></label>
+                  <label><span>右端 Y</span><input id="right-y" type="number" step="1" value="250"><em>px</em></label>
+                </div>
+              </fieldset>
+              <fieldset>
+                <legend>控制取球 ROI</legend>
+                <div class="input-grid four">
+                  <label><span>X</span><input id="roi-x" type="number" min="0" step="1" value="40"><em>px</em></label>
+                  <label><span>Y</span><input id="roi-y" type="number" min="0" step="1" value="170"><em>px</em></label>
+                  <label><span>宽</span><input id="roi-width" type="number" min="32" step="1" value="720"><em>px</em></label>
+                  <label><span>高</span><input id="roi-height" type="number" min="32" step="1" value="160"><em>px</em></label>
+                </div>
+              </fieldset>
+              <fieldset>
+                <legend>位置控制 PID</legend>
+                <div class="input-grid four">
+                  <label><span>Kp</span><input id="gain-kp" type="number" min="0" max="20" step="0.001" value="0.55"></label>
+                  <label><span>Ki</span><input id="gain-ki" type="number" min="0" max="20" step="0.001" value="0.04"></label>
+                  <label><span>Kd</span><input id="gain-kd" type="number" min="0" max="20" step="0.001" value="0.18"></label>
+                  <label><span>方向</span><select id="control-sign"><option value="1">+1</option><option value="-1">-1</option></select></label>
+                </div>
+              </fieldset>
+            </div>
+          </section>
+
+          <section class="view" data-panel="safety">
+            <header class="section-heading">
+              <div><span class="kicker">STRUCTURE / FAILSAFE</span><h2>结构与通信限制</h2></div>
+              <button class="button primary" id="apply-safety-button" type="button" disabled>写入 K230 RAM</button>
+            </header>
+            <div class="safety-layout">
+              <fieldset>
+                <legend>QD4310 绝对角度</legend>
+                <div class="input-grid three">
+                  <label><span>下限</span><input id="motor-min" type="number" step="0.001" value="17.826"><em>°</em></label>
+                  <label><span>中位</span><input id="motor-neutral" type="number" step="0.001" value="60"><em>°</em></label>
+                  <label><span>上限</span><input id="motor-max" type="number" step="0.001" value="92.817"><em>°</em></label>
+                </div>
+              </fieldset>
+              <fieldset>
+                <legend>摆杆与动作</legend>
+                <div class="input-grid three">
+                  <label><span>摆杆下限</span><input id="beam-min" type="number" step="0.1" value="-6"><em>°</em></label>
+                  <label><span>摆杆上限</span><input id="beam-max" type="number" step="0.1" value="6"><em>°</em></label>
+                  <label><span>电机单步</span><input id="motor-step" type="number" min="0.1" max="8" step="0.1" value="2"><em>°</em></label>
+                </div>
+              </fieldset>
+              <fieldset>
+                <legend>失效时间</legend>
+                <div class="input-grid three">
+                  <label><span>视觉超时</span><input id="vision-timeout" type="number" min="80" max="1000" step="10" value="180"><em>ms</em></label>
+                  <label><span>QDrive 超时</span><input id="qdrive-timeout" type="number" min="30" max="500" step="10" value="90"><em>ms</em></label>
+                  <label><span>网页租约</span><input id="lease-timeout" type="number" min="300" max="2000" step="50" value="600"><em>ms</em></label>
+                </div>
+              </fieldset>
+              <fieldset>
+                <legend>运行门限</legend>
+                <div class="input-grid three">
+                  <label><span>最大电流</span><input id="max-current" type="number" min="0.1" max="5" step="0.1" value="1.5"><em>A</em></label>
+                  <label><span>最大球速</span><input id="max-ball-speed" type="number" min="5" max="300" step="1" value="80"><em>cm/s</em></label>
+                  <label><span>积分限幅</span><input id="integral-limit" type="number" min="0.1" max="100" step="0.1" value="12"></label>
+                </div>
+              </fieldset>
+            </div>
+            <div class="risk-strip">
+              <div><span>机械限位</span><strong>必需</strong></div>
+              <div><span>K230 突然断电</span><strong>QDrive watchdog 待重构</strong></div>
+              <div><span>当前参数存储</span><strong>仅 K230 RAM</strong></div>
+            </div>
+          </section>
+
+          <section class="view" data-panel="experiment">
+            <header class="section-heading">
+              <div><span class="kicker">BOUNDED POLICY EVALUATION</span><h2>RL 数据与候选策略</h2></div>
+              <span class="badge" id="episode-badge">待机</span>
+            </header>
+            <div class="experiment-layout">
+              <section class="panel policy-panel">
+                <header class="panel-header"><div><span class="panel-kicker">AFFINE RESIDUAL</span><h2>候选策略</h2></div></header>
+                <div class="policy-grid">
+                  <label><span>位置误差权重</span><input id="policy-w0" type="number" min="-10" max="10" step="0.001" value="0"></label>
+                  <label><span>球速权重</span><input id="policy-w1" type="number" min="-10" max="10" step="0.001" value="0"></label>
+                  <label><span>摆角权重</span><input id="policy-w2" type="number" min="-10" max="10" step="0.001" value="0"></label>
+                  <label><span>目标权重</span><input id="policy-w3" type="number" min="-10" max="10" step="0.001" value="0"></label>
+                  <label><span>偏置</span><input id="policy-bias" type="number" min="-3" max="3" step="0.001" value="0"><em>°</em></label>
+                  <label><span>残差限幅</span><input id="policy-limit" type="number" min="0" max="3" step="0.1" value="1"><em>°</em></label>
+                </div>
+                <div class="button-row">
+                  <label class="file-button"><input id="policy-file" type="file" accept="application/json,.json"><span>载入 JSON</span></label>
+                  <button class="button primary" id="apply-policy-button" type="button" disabled>写入候选</button>
+                </div>
+              </section>
+
+              <section class="panel episode-panel">
+                <header class="panel-header"><div><span class="panel-kicker">FINITE EPISODE</span><h2>实验回合</h2></div></header>
+                <div class="episode-controls">
+                  <label><span>模式</span><select id="episode-mode"><option value="baseline">基线控制</option><option value="policy">候选策略</option></select></label>
+                  <label><span>目标</span><input id="episode-target" type="number" min="-12" max="12" step="0.1" value="0"><em>cm</em></label>
+                  <label><span>时长</span><input id="episode-duration" type="number" min="1" max="20" step="1" value="8"><em>s</em></label>
+                </div>
+                <div class="button-row">
+                  <button class="button primary green" id="start-episode-button" type="button" disabled>开始采集</button>
+                  <button class="button secondary" id="stop-episode-button" type="button" disabled>停止并失能</button>
+                  <button class="button secondary" id="export-episode-button" type="button" disabled>导出 CSV</button>
+                </div>
+              </section>
+            </div>
+
+            <section class="report-band">
+              <div><span>样本</span><strong id="report-samples">--</strong></div>
+              <div><span>时长</span><strong id="report-duration">-- s</strong></div>
+              <div><span>平均绝对误差</span><strong id="report-mae">-- cm</strong></div>
+              <div><span>最大绝对误差</span><strong id="report-max-error">-- cm</strong></div>
+              <div><span>±1 cm 占比</span><strong id="report-within">--%</strong></div>
+              <div><span>峰值电流</span><strong id="report-current">-- A</strong></div>
+            </section>
+            <section class="event-console">
+              <header><span>EVENT LOG</span><button id="clear-log-button" type="button" aria-label="清空事件日志" title="清空事件日志">×</button></header>
+              <pre id="event-log">等待连接</pre>
+            </section>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+    <script type="module" src="./ballbeam_app.mjs?v=20260730-2"></script>
+  </body>
+</html>

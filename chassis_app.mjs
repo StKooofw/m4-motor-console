@@ -37,13 +37,14 @@ import {
 import * as THREE from "./vendor/three.module.min.js";
 import {
   WIRELESS_CAP_RUN,
+  WIRELESS_CAP_TRACE,
   WIRELESS_CAP_TUNE,
   WIRELESS_RUN_HEARTBEAT_MS,
   WirelessCalibrationSession,
   makeWirelessTuneCommand,
   parseWirelessReply,
   wirelessCalibrationResultText,
-} from "./chassis_wireless_console.mjs?v=20260729-4";
+} from "./chassis_wireless_console.mjs?v=20260730-1";
 
 const $ = (id) => document.getElementById(id);
 const elements = Object.fromEntries([
@@ -89,6 +90,10 @@ const elements = Object.fromEntries([
   "wireless-model-response", "wireless-candidate-pid", "wireless-step-angle",
   "wireless-step-gyro", "wireless-left-wheel", "wireless-right-wheel",
   "wireless-step-quality", "wireless-log", "toast",
+  "wireless-gray-raw", "wireless-gray-active", "wireless-gray-count",
+  "wireless-gray-polarity", "wireless-gray-position", "wireless-gray-verdict",
+  "wireless-trace-state", "wireless-trace-button", "wireless-gray-polarity-input",
+  "wireless-apply-gray-button",
 ].map((id) => [id.replaceAll("-", "_"), $(id)]));
 
 const stateNames = ["SAFE", "READY", "RUNNING", "FAULT"];
@@ -114,9 +119,11 @@ let wirelessConnectionBusy = false;
 let wirelessConfirmToken = null;
 let wirelessRunConfirmToken = null;
 let wirelessDeviceStatus = null;
+let wirelessGrayStatus = null;
 let wirelessCalibrationBusy = false;
 let wirelessRunActive = false;
 let wirelessRunHeartbeatTimer = null;
+let wirelessTraceEnabled = false;
 const wirelessTuneGroups = new Set();
 let wirelessStageIndex = 0;
 let wirelessRunFinished = false;
@@ -201,10 +208,21 @@ function wirelessHasCapability(capability) {
   return Boolean((wirelessDeviceStatus?.wirelessCapabilities || 0) & capability);
 }
 
+function wirelessTuneGroupTarget() {
+  return wirelessHasCapability(WIRELESS_CAP_TRACE) ? 4 : 3;
+}
+
+function wirelessLineReady() {
+  if (!wirelessHasCapability(WIRELESS_CAP_TRACE)) return true;
+  return Boolean(wirelessGrayStatus?.lineVisible &&
+    wirelessGrayStatus.activeCount >= 1 && wirelessGrayStatus.activeCount <= 8);
+}
+
 const wirelessTuneInputGroups = Object.freeze({
   drive: [elements.wireless_base_speed, elements.wireless_max_speed, elements.wireless_max_steer],
   line: [elements.wireless_line_kp, elements.wireless_line_ki, elements.wireless_line_kd],
   angle: [elements.wireless_angle_kp, elements.wireless_angle_ki, elements.wireless_angle_kd],
+  gray: [elements.wireless_gray_polarity_input],
 });
 
 function populateWirelessTune(group, values) {
@@ -212,9 +230,10 @@ function populateWirelessTune(group, values) {
   if (!inputs || values.length !== inputs.length) return;
   inputs.forEach((input, index) => { input.value = String(values[index]); });
   wirelessTuneGroups.add(group);
+  const target = wirelessTuneGroupTarget();
   setBadge(elements.wireless_tune_state,
-    wirelessTuneGroups.size === 3 ? "已读取" : `已读取 ${wirelessTuneGroups.size}/3`,
-    wirelessTuneGroups.size === 3 ? "ok" : "busy");
+    wirelessTuneGroups.size === target ? "已读取" : `已读取 ${wirelessTuneGroups.size}/${target}`,
+    wirelessTuneGroups.size === target ? "ok" : "busy");
 }
 
 function captureWirelessTune(group) {
@@ -268,6 +287,36 @@ function wirelessDeviceReady(requireImu = true) {
     && (!requireImu || wirelessDeviceStatus.imuCalibrated);
 }
 
+function renderWirelessGray(reply) {
+  wirelessGrayStatus = reply;
+  elements.wireless_gray_raw.textContent = hex(reply.rawBits, 4);
+  elements.wireless_gray_active.textContent = hex(reply.activeBits, 4);
+  elements.wireless_gray_count.textContent = `${reply.activeCount} 路`;
+  elements.wireless_gray_polarity.textContent = reply.activeHigh ? "高电平黑线" : "低电平黑线";
+  elements.wireless_gray_position.textContent = `${reply.positionMm.toFixed(2)} mm`;
+  const usable = reply.lineVisible && reply.activeCount >= 1 && reply.activeCount <= 8;
+  elements.wireless_gray_verdict.textContent = !reply.lineVisible ? "未检线" :
+    reply.activeCount > 8 ? "有效路数过多" : reply.lineLost ? "丢线计时中" : "可启动";
+  elements.wireless_gray_verdict.dataset.state = usable ? "ok" : "fault";
+  elements.wireless_gray_polarity_input.value = reply.activeHigh ? "1" : "0";
+  if (!wirelessRunActive) {
+    setBadge(elements.wireless_drive_state,
+      usable ? "可发车" : elements.wireless_gray_verdict.textContent,
+      usable ? "ok" : "fault");
+  }
+}
+
+const wirelessErrorText = Object.freeze({
+  RUN_BUSY: "标定或其他运动任务正在进行",
+  RUN_IMU: "陀螺仪尚未完成静态零偏标定",
+  RUN_MODULES: "灰度、陀螺仪或电机板自检未全部通过",
+  RUN_STATE: "底盘不在 READY 状态，请先检查急停或故障",
+  RUN_LINE_NONE: "灰度未识别到黑线，请检查位置与有效电平",
+  RUN_LINE_WIDE: "灰度有效路数超过 8 路，通常是极性错误或传感器跨越大面积黑区",
+  RUN_START: "底盘在启动瞬间退出，请检查最新状态和故障计数",
+  RUN_PRECHECK: "无线发车前置检查失败",
+});
+
 function renderWirelessReply(reply) {
   if (reply.kind === "status") {
     wirelessDeviceStatus = reply;
@@ -294,6 +343,18 @@ function renderWirelessReply(reply) {
     if (!wirelessHasCapability(WIRELESS_CAP_TUNE)) {
       setBadge(elements.wireless_tune_state, "需 v1.0.24", "fault");
     }
+    return;
+  }
+  if (reply.kind === "gray" || reply.kind === "trace-line") {
+    renderWirelessGray(reply);
+    return;
+  }
+  if (reply.kind === "trace-drive") {
+    elements.wireless_step_angle.textContent = `${reply.yawReferenceDeg.toFixed(1)}° / ${reply.yawDeg.toFixed(1)}°`;
+    elements.wireless_step_gyro.textContent = `${reply.gyroDps.toFixed(2)} °/s`;
+    elements.wireless_left_wheel.textContent = `${(reply.leftTargetMrpm / 1000).toFixed(1)} / ${(reply.leftActualMrpm / 1000).toFixed(1)} rpm`;
+    elements.wireless_right_wheel.textContent = `${(reply.rightTargetMrpm / 1000).toFixed(1)} / ${(reply.rightActualMrpm / 1000).toFixed(1)} rpm`;
+    elements.wireless_step_quality.textContent = `差速 ${reply.steerMmS.toFixed(1)} mm/s`;
     return;
   }
   if (reply.kind === "armed") {
@@ -336,9 +397,17 @@ function renderWirelessReply(reply) {
     return;
   }
   if (reply.kind === "tune-end") {
+    const target = wirelessTuneGroupTarget();
     setBadge(elements.wireless_tune_state,
-      wirelessTuneGroups.size === 3 ? "已读取" : "读取不完整",
-      wirelessTuneGroups.size === 3 ? "ok" : "fault");
+      wirelessTuneGroups.size === target ? "已读取" : "读取不完整",
+      wirelessTuneGroups.size === target ? "ok" : "fault");
+    return;
+  }
+  if (reply.kind === "trace-state") {
+    wirelessTraceEnabled = reply.enabled;
+    setBadge(elements.wireless_trace_state, reply.enabled ? "5 Hz 已开启" : "已关闭",
+      reply.enabled ? "ok" : "");
+    elements.wireless_trace_button.textContent = reply.enabled ? "关闭诊断流" : "开启诊断流";
     return;
   }
   if (reply.kind === "started") {
@@ -419,7 +488,9 @@ function renderWirelessReply(reply) {
     wirelessCalibrationBusy = false;
     if (reply.code.includes("RUN")) {
       wirelessRunConfirmToken = null;
-      if (!wirelessRunActive) setBadge(elements.wireless_drive_state, "命令被拒绝", "fault");
+      const detail = wirelessErrorText[reply.code] || reply.code.replaceAll("_", " ");
+      if (!wirelessRunActive) setBadge(elements.wireless_drive_state, detail, "fault");
+      setWirelessRun("发车被拒绝", detail, "fault");
       return;
     }
     if (reply.code.includes("ARM") || reply.code.includes("TOKEN") ||
@@ -447,6 +518,7 @@ function updateWirelessAvailability() {
   const angleReady = wirelessDeviceReady(true);
   const runSupported = wirelessHasCapability(WIRELESS_CAP_RUN);
   const tuneSupported = wirelessHasCapability(WIRELESS_CAP_TUNE);
+  const traceSupported = wirelessHasCapability(WIRELESS_CAP_TRACE);
   const stopped = !wirelessRunActive && !wirelessCalibrationBusy;
   elements.wireless_connect_button.disabled = !supported || wirelessConnectionBusy || wirelessCalibrationBusy;
   elements.wireless_connect_button.textContent = wirelessSession ? "断开无线" : "连接无线";
@@ -460,7 +532,7 @@ function updateWirelessAvailability() {
   elements.wireless_token.textContent = wirelessConfirmToken || "--";
   elements.wireless_run_arm_button.disabled = !online || !runSupported || !stopped ||
     Boolean(wirelessRunConfirmToken) || !elements.wireless_run_safety_confirm.checked ||
-    !wirelessDeviceReady(true);
+    !wirelessDeviceReady(true) || !wirelessLineReady();
   elements.wireless_run_confirm_button.disabled = !online || !runSupported ||
     wirelessRunActive || !wirelessRunConfirmToken;
   elements.wireless_run_stop_button.disabled = !online || !runSupported;
@@ -471,7 +543,15 @@ function updateWirelessAvailability() {
   elements.wireless_apply_drive_button.disabled = tuneDisabled;
   elements.wireless_apply_line_button.disabled = tuneDisabled;
   elements.wireless_apply_angle_button.disabled = tuneDisabled;
-  elements.wireless_save_tune_button.disabled = tuneDisabled || wirelessTuneGroups.size !== 3;
+  elements.wireless_save_tune_button.disabled = tuneDisabled ||
+    wirelessTuneGroups.size !== wirelessTuneGroupTarget();
+  elements.wireless_apply_gray_button.disabled = tuneDisabled || !traceSupported;
+  elements.wireless_gray_polarity_input.disabled = tuneDisabled || !traceSupported;
+  elements.wireless_trace_button.disabled = !online || !traceSupported;
+  if (!traceSupported) {
+    setBadge(elements.wireless_trace_state, online ? "需 v1.0.28" : "等待连接",
+      online ? "fault" : "");
+  }
 }
 
 function handleWirelessLine(line) {
@@ -491,12 +571,16 @@ async function endWirelessSession() {
   wirelessConfirmToken = null;
   wirelessRunConfirmToken = null;
   wirelessDeviceStatus = null;
+  wirelessGrayStatus = null;
+  wirelessTraceEnabled = false;
   wirelessCalibrationBusy = false;
   wirelessTuneGroups.clear();
   if (session) await session.close();
   setWirelessState("未连接");
   setBadge(elements.wireless_drive_state, "等待连接");
   setBadge(elements.wireless_tune_state, "未读取");
+  setBadge(elements.wireless_trace_state, "等待连接");
+  elements.wireless_trace_button.textContent = "开启诊断流";
   updateWirelessAvailability();
 }
 
@@ -517,6 +601,8 @@ async function connectWirelessPort(port) {
     await session.open();
     wirelessSession = session;
     wirelessDeviceStatus = null;
+    wirelessGrayStatus = null;
+    wirelessTraceEnabled = false;
     wirelessCalibrationBusy = false;
     wirelessRunConfirmToken = null;
     clearWirelessRunHeartbeat();
@@ -1503,6 +1589,8 @@ function bindEvents() {
     catch (error) { if (error.name !== "NotFoundError") toast(error.message, "error"); }
   });
   elements.wireless_status_button.addEventListener("click", () => runWirelessCommand("STATUS"));
+  elements.wireless_trace_button.addEventListener("click", () =>
+    runWirelessCommand(wirelessTraceEnabled ? "TRACE OFF" : "TRACE ON"));
   elements.wireless_run_safety_confirm.addEventListener("change", updateWirelessAvailability);
   elements.wireless_run_arm_button.addEventListener("click", async () => {
     wirelessRunConfirmToken = null;
@@ -1535,6 +1623,8 @@ function bindEvents() {
     applyWirelessTune("line"));
   elements.wireless_apply_angle_button.addEventListener("click", () =>
     applyWirelessTune("angle"));
+  elements.wireless_apply_gray_button.addEventListener("click", () =>
+    applyWirelessTune("gray"));
   elements.wireless_save_tune_button.addEventListener("click", () =>
     runWirelessCommand("SAVE TUNE"));
   elements.wireless_gyro_button.addEventListener("click", () => runWirelessCommand("GYRO"));

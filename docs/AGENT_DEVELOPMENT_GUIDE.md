@@ -15,6 +15,7 @@
 | --- | --- | --- | --- |
 | `CM4M` | 自研 MSPM0G3507SPTR 四路 DRV8701 闭环电机板 | 升级板型 ID `0x4D344D43` | `motor.html` |
 | `CHAS` | 天猛星 MSPM0G3507 双轮灰度循迹底盘主控 | PING 产品 ID、升级板型 ID 均为 `0x53414843` | `chassis.html` |
+| `BBK230` | 庐山派 K230 + GC2093 + QDrive QD4310 | NDJSON 产品 ID `BBK230`；当前无网页升级板型 ID | `ballbeam.html` |
 
 开始任何任务前执行：
 
@@ -30,6 +31,8 @@ git status --short
   `docs/memory-map.md`、`docs/protocol.md`。
 - CHAS：`gray_line_chassis/README.md`、`docs/wiring.md`、
   `docs/control-and-tuning.md`、`docs/validation.md`。
+- BBK230：`lushan_k230_usb_camera_yolo/h_ball_beam/README.md`、
+  `h_ball_beam/docs/protocol.md`，以及 QDrive 当前通信协议源码/文档。
 - 公共网页：本仓库 `README.md`、本文，以及本次要修改的 HTML、CSS、MJS。
 - MSPM0G 驱动：使用 `mspm0g-contest` 技能定位资料，但实际 DriverLib API 仍要在本机
   SDK 头文件中用 `rg` 复核。
@@ -39,8 +42,8 @@ git status --short
 
 ## 2. 不能越过的边界
 
-1. CM4M 和 CHAS 是两块不同 PCB、两个独立产品。不能混用固件、板型 ID、状态记录、
-   参数记录或升级镜像。
+1. CM4M、CHAS 和 BBK230 是三个独立产品。不能混用设备身份、命令、状态、参数记录或
+   升级镜像；BBK230 不得伪装为 CM4M/CHAS，也不得让网页绕过 K230 直控 QDrive。
 2. 上电、复位、断链、通信超时、升级入口、无效参数和异常恢复都必须先停机。
    网页连接成功、读取参数或恢复轮询均不得自动恢复旧运动目标。
 3. 网页只能在用户明确点击连接后调用 Web Serial 端口选择/打开流程，页面加载时不得
@@ -73,7 +76,9 @@ git status --short
 | CHAS 到 CM4M | `gray_line_chassis/include/motor_protocol.h`、`src/motor_protocol.c` | `chassis_bridge.mjs`、CM4M 页面 |
 | CM4M 升级 | `motor_firmware/docs/memory-map.md`、镜像打包脚本 | `firmware_update.mjs` |
 | CHAS 升级 | CHAS 内存布局、镜像打包脚本 | `chassis_firmware_update.mjs` |
-| 跨页面串口交接 | 浏览器行为和安全状态 | `serial_handoff.mjs`、两个 `*_app.mjs` |
+| 跨页面串口交接 | 浏览器行为和安全状态 | `serial_handoff.mjs`、三个产品 `*_app.mjs` |
+| BBK230 网页协议 | `lushan_k230_usb_camera_yolo/h_ball_beam/docs/protocol.md`、`ballbeam_protocol.py` | `ballbeam_protocol.mjs`、`ballbeam_app.mjs` |
+| K230 到 QDrive | QDrive `CommunicationProtocol.md`、当前 `CommunicateTask.cpp` | `qdrive_uart.py`；网页不直接消费 |
 
 `motor_firmware/web/` 还有受自动测试覆盖的网页实现。修改 Pages 中同名协议、参数、升级
 或整定模块前，必须先比较两份实现，明确哪份是本次源、哪份要同步。不能让公开页面和固件
@@ -91,12 +96,17 @@ flowchart LR
     Link["PB6/PB7 UART1"]
     CM4M["CM4M 四路电机板"]
     CN4["CM4M CN4\n3.3 V UART"]
+    HostUART["3.3 V USB-UART"]
+    K230["BBK230 K230\nGC2093 视觉与安全状态机"]
+    QDrive["QDrive QD4310"]
 
     Browser -->|"底盘页面 115200-8-N-1"| CH340 --> CHAS
     Gray --> CHAS
     IMU --> CHAS
     CHAS -->|"电机命令 / 透传"| Link --> CM4M
     Browser -.->|"电机页面直接连接"| CN4 --> CM4M
+    Browser -->|"滚球页面 NDJSON"| HostUART -->|"UART1 GPIO3/GPIO4"| K230
+    K230 -->|"UART2 GPIO11/GPIO12\n5/10 字节 QDrive 帧"| QDrive
 ```
 
 关键边界：
@@ -107,6 +117,8 @@ flowchart LR
 - CM4M CN4：115200-8-N-1、3.3 V 逻辑；板端 RX 是 PA11/UART0_RX，板端 TX 是
   PB6/UART1_TX。固件把两个 UART 实例组成一条逻辑全双工链路。
 - 两板独立供电时只共地，不并联 3.3 V；3.3 V UART 不是 5 V TTL 或 RS-232。
+- BBK230 网页链路和 QDrive 链路均为 115200-8-N-1、3.3 V、共地。K230 是唯一控制仲裁者；
+  网页串口不得与 QDrive 串口共享，K230 断电后的失能仍依赖后续 QDrive watchdog 重构。
 
 ## 5. 网页仓库结构
 
@@ -127,6 +139,9 @@ flowchart LR
 | `chassis_bridge.mjs` | 经 CHAS 同端口进入/退出 CM4M 透传 |
 | `chassis_firmware_update.mjs` | CHAS 镜像拒绝规则和 TI 二级 BSL 客户端 |
 | `serial_handoff.mjs` | 多页面 Web Serial 所有权协调 |
+| `ballbeam.html`、`ballbeam_app.mjs` | BBK230 工作台、Web Serial 会话、监控与有限回合 |
+| `ballbeam_protocol.mjs` | BBK230 NDJSON 身份、请求配对、配置/策略校验和 CSV 报告 |
+| `ballbeam.css` | BBK230 桌面/移动布局 |
 | `editorial-ui.css`、`styles.css`、`chassis.css` | 公共视觉语言与产品布局 |
 | `vendor/three*.js` | 底盘 IMU 三维姿态显示依赖 |
 | `tests/` | Pages 本地 Node 测试，不代表全部跨仓测试 |
@@ -134,9 +149,9 @@ flowchart LR
 不要在 UI 文件里再实现一套 CRC、帧解析或镜像校验。协议细节集中在协议模块；页面负责
 连接状态、命令编排和可视化。
 
-## 6. 公共应用帧
+## 6. CM4M/CHAS 公共应用帧
 
-两种产品目前使用相同的外层帧，所有多字节值均为小端序：
+CM4M 和 CHAS 目前使用相同的外层帧，所有多字节值均为小端序：
 
 ```text
 A5 5A | version:u8 | flags:u8 | sequence:u16 |
@@ -231,6 +246,19 @@ capabilities:u32 | protocol_version:u32
 
 新增可选功能时优先分配 capability bit。页面必须先检查能力再显示为可操作状态；旧固件缺少
 能力时禁用控件并明确提示最低版本，不能点击后才用“参数无效”兜底。
+
+### 6.3 BBK230 NDJSON
+
+BBK230 不使用 CM4M/CHAS 二进制帧。Browser-K230 链路是一行一条 UTF-8 JSON，换行符为
+帧边界，请求固定携带版本、产品身份和序号：
+
+```json
+{"v":1,"product":"BBK230","seq":7,"type":"command","command":"set_target","data":{"target_cm":5}}
+```
+
+ACK 必须按 `seq` 和 `command` 配对，错误产品、版本、消息类型或超长行均拒绝。只有
+`heartbeat` 刷新运动租约；PING、遥测和其他配置命令不得维持使能。权威字段和命令集合见
+`lushan_k230_usb_camera_yolo/h_ball_beam/docs/protocol.md`。
 
 ## 7. 状态、遥测和单位
 
@@ -389,13 +417,13 @@ m4-motor-console-pages/chassis_app.mjs
 patch，例如 `0x00010004` 显示为 1.0.4。发布版本不能只改文件名；源码、打包头、PING、README、
 验证记录和交付文件必须一致。
 
-接入第三种产品时，不要把它伪装为 CM4M 或 CHAS 的“模式”。至少完成：
+接入新产品时，不要把它伪装为 CM4M、CHAS 或 BBK230 的“模式”。至少完成：
 
-1. 分配唯一应用 `product_id` 和唯一升级 `board_id`，记录分配依据并加冲突测试。
+1. 分配唯一应用 `product_id`；若提供网页升级，再分配唯一 `board_id`，记录依据并加冲突测试。
 2. 定义 PING 身份结构和 capability 位。新产品不应延续 CM4M 仅返回版本的历史限制。
 3. 明确物理 UART、电平、波特率、超时、板端安全停机和恢复路径。
-4. 独立定义命令、状态、参数和错误码；只复用经过验证的外层帧/CRC/BSL 传输。
-5. 新建产品 HTML、协议模块、业务 app 模块和升级镜像校验器。
+4. 独立定义命令、状态、参数和错误码；只复用明确适用且经过验证的传输层。
+5. 新建产品 HTML、协议模块和业务 app 模块；提供网页升级时再增加独立镜像校验器。
 6. 在 `index.html` 添加产品入口；选择页不提前获取串口权限。
 7. 接入 `serial_handoff.mjs`，定义升级/整定/危险操作时的拒绝规则。
 8. 增加“本产品拒绝其他产品身份和镜像”的双向测试。
@@ -498,7 +526,7 @@ Factory Reset 或任意内存回读。
 
 ## 13. UI 和交互规范
 
-两个控制台应使用统一的信息层级、颜色语义、控件尺寸和状态文案，同时保持产品功能独立。
+三个控制台应使用统一的信息层级、颜色语义、控件尺寸和状态文案，同时保持产品功能独立。
 
 - 第一屏优先显示产品身份、连接状态、急停和核心实时状态，不做营销式 hero。
 - 运行、急停、升级、保存参数等状态必须清楚区分；危险操作不能仅靠颜色表达。
@@ -555,6 +583,7 @@ python .\serve_web.py --port 8765
 真实 Chrome/Edge 至少检查 1280x720 和 390x844：
 
 - 首页产品选择以及 CM4M/CHAS 状态不串页。
+- BBK230 只接受 `product="BBK230"` 的 NDJSON 身份，页面不直接连接 QDrive，也不暴露视觉检测阈值。
 - 页面加载不弹串口授权；只有点击连接才弹。
 - 错产品、错 PING 长度、错镜像、旧 capability 都被明确拒绝。
 - 连接、断开、急停、解除急停、轮询停止和串口 handoff 状态正确。
@@ -615,7 +644,7 @@ python .\serve_web.py --port 8765
 你正在 H:\race\ti_cup\2026_my_ti 工作。
 
 任务：<一句话描述要开发的固件/网页功能>
-目标产品：<CM4M | CHAS | 新产品名>
+目标产品：<CM4M | CHAS | BBK230 | 新产品名>
 目标版本：<例如 0x0001000A；若未确定先核对当前版本再分配>
 允许范围：<明确目录和可修改模块>
 禁止动作：未经本任务再次授权，不连接/复位/烧录板卡，不发送运动命令。

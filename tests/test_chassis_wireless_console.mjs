@@ -15,11 +15,16 @@ assert.deepEqual(decoder.push("RESS\n"), ["PROGRESS"]);
 assert.deepEqual(decoder.push(`${"X".repeat(33)}\nSTATUS\n`), ["STATUS"]);
 
 assert.equal(isAllowedWirelessCommand("STATUS"), true);
+assert.equal(isAllowedWirelessCommand("GRAY"), true);
+assert.equal(isAllowedWirelessCommand("TRACE ON"), true);
+assert.equal(isAllowedWirelessCommand("TRACE OFF"), true);
 assert.equal(isAllowedWirelessCommand("CONFIRM ANGLE 12AB34CD"), true);
 assert.equal(isAllowedWirelessCommand("CONFIRM RUN 12AB34CD"), true);
 assert.equal(isAllowedWirelessCommand("KEEP RUN"), true);
 assert.equal(isAllowedWirelessCommand("SET LINE 0.0450 0.0000 0.0020"), true);
 assert.equal(isAllowedWirelessCommand("SAVE TUNE"), true);
+assert.equal(isAllowedWirelessCommand("SET GRAY 0"), true);
+assert.equal(isAllowedWirelessCommand("SET GRAY 2"), false);
 assert.equal(isAllowedWirelessCommand("SET WHEELS 150 150"), false);
 assert.equal(isAllowedWirelessCommand("CLEAR ESTOP"), false);
 assert.equal(isAllowedWirelessCommand("SAVE PARAMS"), false);
@@ -28,6 +33,8 @@ assert.equal(makeWirelessTuneCommand("drive", [180, 600, 420]),
   "SET DRIVE 180.0000 600.0000 420.0000");
 assert.equal(makeWirelessTuneCommand("line", [0.045, 0, 0.002]),
   "SET LINE 0.0450 0.0000 0.0020");
+assert.equal(makeWirelessTuneCommand("gray", [0]), "SET GRAY 0");
+assert.throws(() => makeWirelessTuneCommand("gray", [2]));
 assert.throws(() => makeWirelessTuneCommand("angle", [101, 0, 0]));
 assert.throws(() => makeWirelessTuneCommand("line", [Number.NaN, 0, 0]));
 
@@ -46,6 +53,11 @@ assert.deepEqual(parseWirelessReply(
   firmwareVersion: 0x00010018, wirelessCapabilities: 3, runActive: true,
 });
 assert.deepEqual(parseWirelessReply(
+  "GRAY RAW=FFF3 ACTIVE=000C COUNT=2 POL=0 VIS=1 LOST=0 POS=-3.5000"), {
+  kind: "gray", rawBits: 0xfff3, activeBits: 0x000c, activeCount: 2,
+  activeHigh: false, lineVisible: true, lineLost: false, positionMm: -3.5,
+});
+assert.deepEqual(parseWirelessReply(
   "OK STATUS STATE=1 READY=07 IMU=1 CAL=0 PROGRESS=0 RESULT=0 STAGE=0/12"), {
   kind: "status", state: 1, readyMask: 7, imuCalibrated: true,
   calibrationState: 0, progress: 0, result: 0, stageIndex: 0, stageTotal: 12,
@@ -59,6 +71,25 @@ assert.deepEqual(parseWirelessReply(
   "TUNE LINE KP=0.0450 KI=0.0000 KD=0.0020"), {
   kind: "tune", group: "line", values: [0.045, 0, 0.002],
 });
+assert.deepEqual(parseWirelessReply("TUNE GRAY POL=0"), {
+  kind: "tune", group: "gray", values: [0],
+});
+assert.deepEqual(parseWirelessReply(
+  "TRACE L T=1234 RAW=FFF3 ACT=000C N=2 P=-3500 POL=0 V=1 X=0"), {
+  kind: "trace-line", timestampMs: 1234, rawBits: 0xfff3,
+  activeBits: 0x000c, activeCount: 2, positionMm: -3.5,
+  activeHigh: false, lineVisible: true, lineLost: false,
+});
+assert.deepEqual(parseWirelessReply(
+  "TRACE D Y=12500 H=10000 G=2500 S=-35000 LT=120000 LA=118000 RT=100000 RA=99000"), {
+  kind: "trace-drive", yawDeg: 12.5, yawReferenceDeg: 10, gyroDps: 2.5,
+  steerMmS: -35, leftTargetMrpm: 120000, leftActualMrpm: 118000,
+  rightTargetMrpm: 100000, rightActualMrpm: 99000,
+});
+assert.deepEqual(parseWirelessReply("OK TRACE ON"),
+  { kind: "trace-state", enabled: true });
+assert.deepEqual(parseWirelessReply("OK TRACE OFF"),
+  { kind: "trace-state", enabled: false });
 assert.deepEqual(parseWirelessReply("OK RUN START LEASE=600"),
   { kind: "run-started", leaseMs: 600 });
 assert.deepEqual(parseWirelessReply("OK RUN STOP"),
@@ -117,6 +148,9 @@ for (const malformed of [
   "DIAG STEP TARGET=30 YAW=17 GYRO=12 RISE=500 OVR=0 SAT=bad WERR=0.1",
   "DONE ANGLE KP=1.8723",
   "TUNE DRIVE BASE=180 MAX=600",
+  "GRAY RAW=FFF3 ACTIVE=000C COUNT=2 POL=2 VIS=1 LOST=0 POS=-3.5",
+  "TRACE L T=123 RAW=FFF3 ACT=000C N=2 P=0 POL=0 V=1",
+  "TRACE D Y=1 H=2 G=3 S=4 LT=5 LA=6 RT=7",
 ]) {
   assert.deepEqual(parseWirelessReply(malformed), { kind: "other" });
 }

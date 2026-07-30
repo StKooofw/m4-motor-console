@@ -2,6 +2,7 @@ export const WIRELESS_BAUD_RATE = 115200;
 export const WIRELESS_RUN_HEARTBEAT_MS = 200;
 export const WIRELESS_CAP_RUN = 1 << 0;
 export const WIRELESS_CAP_TUNE = 1 << 1;
+export const WIRELESS_CAP_TRACE = 1 << 2;
 
 export class WirelessConsoleError extends Error {}
 
@@ -51,10 +52,12 @@ function pairField(fields, name) {
 export function isAllowedWirelessCommand(command) {
   const decimal = "[+]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)";
   return [
-    "STATUS", "GYRO", "ARM ANGLE", "ARM RUN", "KEEP RUN", "STOP RUN",
-    "GET TUNE", "SAVE TUNE", "ABORT", "ESTOP",
+    "STATUS", "GRAY", "TRACE ON", "TRACE OFF", "GYRO", "ARM ANGLE",
+    "ARM RUN", "KEEP RUN", "STOP RUN", "GET TUNE", "SAVE TUNE",
+    "ABORT", "ESTOP",
   ].includes(command)
     || /^CONFIRM (?:ANGLE|RUN) [0-9A-F]{8}$/.test(command)
+    || /^SET GRAY [01]$/.test(command)
     || new RegExp(`^SET (?:DRIVE|LINE|ANGLE) ${decimal} ${decimal} ${decimal}$`).test(command);
 }
 
@@ -68,6 +71,12 @@ function finiteInRange(value, minimum, maximum, name) {
 
 export function makeWirelessTuneCommand(group, values) {
   const normalized = String(group).trim().toUpperCase();
+  if (normalized === "GRAY") {
+    if (!Array.isArray(values) || values.length !== 1 || !/^[01]$/.test(String(values[0]))) {
+      throw new WirelessConsoleError("灰度黑线有效电平只能选择低电平或高电平");
+    }
+    return `SET GRAY ${Number(values[0])}`;
+  }
   let ranges;
   let names;
   if (normalized === "DRIVE") {
@@ -127,8 +136,29 @@ export function parseWirelessReply(line) {
       runActive: fields.RUN === "1",
     });
   }
+  if (line.startsWith("GRAY ")) {
+    const fields = parseFields(line);
+    const values = requiredNumberFields(fields, ["COUNT", "POS"]);
+    const rawBits = /^[0-9A-F]{4}$/.test(fields.RAW || "")
+      ? Number.parseInt(fields.RAW, 16) : null;
+    const activeBits = /^[0-9A-F]{4}$/.test(fields.ACTIVE || "")
+      ? Number.parseInt(fields.ACTIVE, 16) : null;
+    if (!values || rawBits == null || activeBits == null ||
+        !/^[01]$/.test(fields.POL || "") || !/^[01]$/.test(fields.VIS || "") ||
+        !/^[01]$/.test(fields.LOST || "")) return otherReply();
+    return Object.freeze({
+      kind: "gray",
+      rawBits,
+      activeBits,
+      activeCount: values.COUNT,
+      activeHigh: fields.POL === "1",
+      lineVisible: fields.VIS === "1",
+      lineLost: fields.LOST === "1",
+      positionMm: values.POS,
+    });
+  }
   if (line.startsWith("TUNE ")) {
-    const group = /^(?:TUNE) (DRIVE|LINE|ANGLE) /.exec(line)?.[1]?.toLowerCase();
+    const group = /^(?:TUNE) (DRIVE|LINE|ANGLE|GRAY) /.exec(line)?.[1]?.toLowerCase();
     const fields = parseFields(line);
     if (group === "drive") {
       const values = requiredNumberFields(fields, ["BASE", "MAX", "STEER"]);
@@ -140,7 +170,44 @@ export function parseWirelessReply(line) {
       return values ? Object.freeze({ kind: "tune", group,
         values: Object.freeze([values.KP, values.KI, values.KD]) }) : otherReply();
     }
+    if (group === "gray" && /^[01]$/.test(fields.POL || "")) {
+      return Object.freeze({ kind: "tune", group, values: Object.freeze([Number(fields.POL)]) });
+    }
     return otherReply();
+  }
+  if (line.startsWith("TRACE L ")) {
+    const fields = parseFields(line);
+    const values = requiredNumberFields(fields, ["T", "N", "P"]);
+    const rawBits = /^[0-9A-F]{4}$/.test(fields.RAW || "")
+      ? Number.parseInt(fields.RAW, 16) : null;
+    const activeBits = /^[0-9A-F]{4}$/.test(fields.ACT || "")
+      ? Number.parseInt(fields.ACT, 16) : null;
+    if (!values || rawBits == null || activeBits == null ||
+        !/^[01]$/.test(fields.POL || "") || !/^[01]$/.test(fields.V || "") ||
+        !/^[01]$/.test(fields.X || "")) return otherReply();
+    return Object.freeze({
+      kind: "trace-line", timestampMs: values.T, rawBits, activeBits,
+      activeCount: values.N, positionMm: values.P / 1000,
+      activeHigh: fields.POL === "1", lineVisible: fields.V === "1",
+      lineLost: fields.X === "1",
+    });
+  }
+  if (line.startsWith("TRACE D ")) {
+    const fields = parseFields(line);
+    const values = requiredNumberFields(fields,
+      ["Y", "H", "G", "S", "LT", "LA", "RT", "RA"]);
+    if (!values) return otherReply();
+    return Object.freeze({
+      kind: "trace-drive",
+      yawDeg: values.Y / 1000,
+      yawReferenceDeg: values.H / 1000,
+      gyroDps: values.G / 1000,
+      steerMmS: values.S / 1000,
+      leftTargetMrpm: values.LT,
+      leftActualMrpm: values.LA,
+      rightTargetMrpm: values.RT,
+      rightActualMrpm: values.RA,
+    });
   }
   if (line.startsWith("PROGRESS ")) {
     const fields = parseFields(line);
@@ -261,6 +328,8 @@ export function parseWirelessReply(line) {
   if (line === "OK TUNE RAM") return Object.freeze({ kind: "tune-applied" });
   if (line === "OK TUNE SAVED") return Object.freeze({ kind: "tune-saved" });
   if (line === "OK TUNE END") return Object.freeze({ kind: "tune-end" });
+  if (line === "OK TRACE ON") return Object.freeze({ kind: "trace-state", enabled: true });
+  if (line === "OK TRACE OFF") return Object.freeze({ kind: "trace-state", enabled: false });
   if (line.startsWith("ERR ")) {
     return Object.freeze({ kind: "error", code: line.slice(4) });
   }
