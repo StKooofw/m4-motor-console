@@ -117,7 +117,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .confirmations label { display: flex; align-items: center; gap: 7px; color: #495056; font-size: 10px; }
 
 label:not(.file-button):not(.confirmations label) { position: relative; display: grid; gap: 6px; color: var(--muted); font-size: 9px; }
-label input[type="number"], label select { width: 100%; min-width: 0; min-height: 40px; padding: 0 38px 0 10px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--ink); font: 650 11px ui-monospace, monospace; }
+label input[type="number"], label input[type="text"], label select { width: 100%; min-width: 0; min-height: 40px; padding: 0 38px 0 10px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--ink); font: 650 11px ui-monospace, monospace; }
 label select { padding-right: 10px; }
 label em { position: absolute; right: 10px; bottom: 13px; color: var(--muted-soft); font-size: 9px; font-style: normal; pointer-events: none; }
 .section-heading { min-height: 76px; padding: 0 2px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
@@ -151,6 +151,59 @@ legend { padding: 0 7px; color: #353b40; font-size: 11px; font-weight: 700; }
 .toast { position: fixed; right: 22px; bottom: 22px; z-index: 40; max-width: min(420px,calc(100% - 44px)); padding: 12px 15px; border: 1px solid var(--line); border-radius: 6px; background: #fff; box-shadow: 0 14px 34px rgba(0,0,0,.18); color: var(--ink); font-size: 12px; }
 .toast[data-kind="error"] { border-color: #d7a2a6; color: #7b252b; }
 
+.button.compact { min-height: 32px; padding: 0 12px; font-size: 10px; }
+.icon-button { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--ink); font-size: 18px; }
+.qdrive-heading { min-height: 92px; }
+.qdrive-connect-row { display: flex; align-items: end; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.qdrive-connect-row label { width: 142px; }
+.qdrive-connect-row .badge, .qdrive-connect-row .button { margin-bottom: 1px; }
+.qdrive-console-layout { display: grid; grid-template-columns: minmax(0,1.35fr) minmax(280px,.65fr); gap: 16px; }
+.qdrive-terminal-panel { overflow: hidden; background: #15191b; border-color: #30363a; }
+.qdrive-terminal-panel .panel-header { border-color: #30363a; color: #fff; }
+.qdrive-terminal-panel .panel-kicker { color: #8f999f; }
+.qdrive-terminal-panel .icon-button { border-color: #3b4246; background: #202528; color: #e5eaec; }
+#qdrive-terminal-output { min-height: 330px; max-height: 430px; margin: 0; padding: 16px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: #111416; color: #cad5d9; font: 11px/1.55 ui-monospace, "Cascadia Mono", monospace; }
+.qdrive-terminal-form { padding: 12px; display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: end; gap: 8px; border-top: 1px solid #30363a; }
+.qdrive-terminal-form label { color: #9ba5aa; }
+.qdrive-terminal-form input { border-color: #3b4246; background: #1b2023; color: #eef2f3; }
+.qdrive-device-panel .value-list { padding-bottom: 8px; }
+.qdrive-status-actions { padding: 0 18px 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.qdrive-status-actions .button { min-width: 0; }
+.qdrive-waveform-panel { margin-top: 16px; }
+.qdrive-wave-controls { display: flex; align-items: end; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.qdrive-wave-controls label { width: 104px; }
+.qdrive-wave-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); }
+.qdrive-wave-grid article { min-width: 0; border-left: 1px solid var(--line-soft); }
+.qdrive-wave-grid article:first-child { border-left: 0; }
+.qdrive-wave-grid article > header { min-height: 42px; padding: 0 14px; display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 9px; }
+.qdrive-wave-grid strong { color: var(--ink); font: 650 11px/1 ui-monospace, monospace; }
+.qdrive-wave-grid canvas { width: 100%; height: 180px; display: block; border-top: 1px solid var(--line-soft); background: #fafbfb; }
+.qdrive-control-layout { margin-top: 16px; display: grid; grid-template-columns: minmax(300px,.7fr) minmax(0,1.3fr); gap: 16px; align-items: start; }
+.qdrive-direct-body { padding: 18px; display: grid; gap: 18px; }
+.qdrive-direct-form { display: grid; grid-template-columns: 1fr 1fr; align-items: end; gap: 10px; }
+.qdrive-direct-form .button { grid-column: 1 / -1; }
+.qdrive-confirmations { padding: 14px 0; border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
+.qdrive-parameter-body { padding: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.qdrive-parameter-body fieldset:last-child { grid-column: 1 / -1; }
+.config-support { min-height: 40px; padding: 0 10px; display: flex; align-items: center; border: 1px dashed var(--line); border-radius: 5px; color: var(--muted); font-size: 9px; line-height: 1.4; }
+.config-support[data-state="supported"] { border-color: #afd2c0; color: var(--green); background: #eef8f2; }
+.config-support[data-state="unsupported"] { border-color: #dfc58f; color: var(--amber); background: #fff8e9; }
+.qdrive-maintenance-band { margin-top: 16px; display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.qdrive-maintenance-band > div { min-width: 0; min-height: 92px; padding: 14px; display: grid; align-content: center; gap: 9px; border-left: 1px solid var(--line-soft); }
+.qdrive-maintenance-band > div:first-child { border-left: 0; }
+.qdrive-maintenance-band span { color: var(--muted); font-size: 9px; }
+.qdrive-maintenance-band .button { width: 100%; min-width: 0; padding: 0 8px; }
+.qdrive-dialog { width: min(520px,calc(100% - 32px)); padding: 0; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); box-shadow: 0 24px 70px rgba(0,0,0,.24); }
+.qdrive-dialog::backdrop { background: rgba(17,20,22,.58); }
+.qdrive-dialog form { margin: 0; padding: 22px; display: grid; gap: 18px; }
+.qdrive-dialog h2 { margin: 6px 0 0; font-size: 20px; font-weight: 600; }
+.qdrive-dialog p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.qdrive-dialog .button-row { justify-content: flex-end; }
+.qdrive-dfu-dialog { width: min(620px,calc(100% - 32px)); }
+.qdrive-dfu-steps { display: grid; grid-template-columns: auto minmax(0,1fr); align-items: center; gap: 12px; }
+.qdrive-dfu-steps strong { min-width: 0; overflow-wrap: anywhere; font: 650 10px/1.4 ui-monospace, monospace; }
+.qdrive-dfu-dialog progress { width: 100%; height: 12px; accent-color: var(--green); }
+
 @media (max-width: 1180px) {
   .app-header__inner { grid-template-columns: auto 1fr; }
   .brand { justify-self: start; }
@@ -166,6 +219,12 @@ legend { padding: 0 7px; color: #353b40; font-size: 11px; font-weight: 700; }
   .metric-band div:nth-child(5), .metric-band div:nth-child(6), .report-band div:nth-child(5), .report-band div:nth-child(6) { border-top: 1px solid var(--line-soft); }
   .control-band { grid-template-columns: 1fr; }
   .arm-control { justify-content: flex-start; }
+  .qdrive-wave-grid { grid-template-columns: 1fr; }
+  .qdrive-wave-grid article { border-left: 0; border-top: 1px solid var(--line-soft); }
+  .qdrive-wave-grid article:first-child { border-top: 0; }
+  .qdrive-maintenance-band { grid-template-columns: repeat(3,minmax(0,1fr)); }
+  .qdrive-maintenance-band > div:nth-child(4) { border-left: 0; border-top: 1px solid var(--line-soft); }
+  .qdrive-maintenance-band > div:nth-child(5), .qdrive-maintenance-band > div:nth-child(6) { border-top: 1px solid var(--line-soft); }
 }
 
 @media (max-width: 820px) {
@@ -177,6 +236,11 @@ legend { padding: 0 7px; color: #353b40; font-size: 11px; font-weight: 700; }
   .identity-strip div:nth-child(3) { border-left: 0; border-top: 1px solid #3a3e41; }
   .identity-strip div:nth-child(4) { border-top: 1px solid #3a3e41; }
   .monitor-layout, .experiment-layout, .form-layout, .safety-layout { grid-template-columns: 1fr; }
+  .qdrive-console-layout, .qdrive-control-layout { grid-template-columns: 1fr; }
+  .qdrive-heading { align-items: flex-start; flex-direction: column; padding: 18px 0 12px; }
+  .qdrive-connect-row { width: 100%; justify-content: flex-start; }
+  .qdrive-parameter-body { grid-template-columns: 1fr; }
+  .qdrive-parameter-body fieldset:last-child { grid-column: auto; }
   .input-grid.four { grid-template-columns: 1fr 1fr; }
   .policy-grid { grid-template-columns: 1fr 1fr; }
   .episode-controls { grid-template-columns: 1fr; }
@@ -215,4 +279,18 @@ legend { padding: 0 7px; color: #353b40; font-size: 11px; font-weight: 700; }
   .risk-strip div:first-child { border-top: 0; }
   .policy-panel .button-row, .episode-panel .button-row { align-items: stretch; flex-direction: column; }
   .policy-panel .button, .episode-panel .button, .file-button { width: 100%; justify-content: center; }
+  .qdrive-connect-row { display: grid; grid-template-columns: 1fr; align-items: stretch; }
+  .qdrive-connect-row label, .qdrive-connect-row .badge, .qdrive-connect-row .button { width: 100%; margin: 0; }
+  .qdrive-terminal-form, .qdrive-direct-form { grid-template-columns: 1fr; }
+  .qdrive-direct-form .button { grid-column: auto; }
+  .qdrive-wave-controls { width: 100%; display: grid; grid-template-columns: 1fr; }
+  .qdrive-wave-controls label, .qdrive-wave-controls .button { width: 100%; }
+  .qdrive-parameter-body { padding: 10px; }
+  .qdrive-maintenance-band { grid-template-columns: 1fr 1fr; }
+  .qdrive-maintenance-band > div, .qdrive-maintenance-band > div:nth-child(4), .qdrive-maintenance-band > div:nth-child(5), .qdrive-maintenance-band > div:nth-child(6) { border-left: 1px solid var(--line-soft); border-top: 1px solid var(--line-soft); }
+  .qdrive-maintenance-band > div:nth-child(odd) { border-left: 0; }
+  .qdrive-maintenance-band > div:nth-child(-n+2) { border-top: 0; }
+  .qdrive-dfu-steps { grid-template-columns: 1fr; }
+  .qdrive-dialog .button-row { align-items: stretch; flex-direction: column; }
+  .qdrive-dialog .button { width: 100%; }
 }

@@ -10,6 +10,23 @@ import {
   validatePolicy,
 } from "./ballbeam_protocol.mjs?v=20260730-2";
 import {
+  QDRIVE_CONTROL_SPECS,
+  QDriveSerialSession,
+  formatConfigCommand,
+  formatControlCommand,
+  isCompleteQDriveStatus,
+  parseQDriveConfig,
+  parseQDriveIdentity,
+  parseQDriveStatus,
+  qdriveSamplesCsv,
+  stripAnsi,
+} from "./qdrive_shell.mjs?v=20260731-1";
+import {
+  chooseQDriveDfuDevice,
+  flashQDriveDfu,
+  parseDfuSeFile,
+} from "./qdrive_dfu.mjs?v=20260731-1";
+import {
   registerSerialReleaseHandler,
   requestSerialHandoff,
   serialConnectionMessage,
@@ -33,6 +50,20 @@ const elements = Object.fromEntries([
   "episode-target", "episode-duration", "start-episode-button", "stop-episode-button",
   "export-episode-button", "report-samples", "report-duration", "report-mae", "report-max-error",
   "report-within", "report-current", "clear-log-button", "event-log", "toast",
+  "qdrive-baud-rate", "qdrive-connection-badge", "qdrive-connect-button", "qdrive-terminal-clear",
+  "qdrive-terminal-output", "qdrive-terminal-form", "qdrive-terminal-input", "qdrive-terminal-send",
+  "qdrive-read-device", "qdrive-hardware", "qdrive-software", "qdrive-drive-state",
+  "qdrive-control-mode", "qdrive-can-id-value", "qdrive-voltage", "qdrive-read-status",
+  "qdrive-read-config", "qdrive-wave-frequency", "qdrive-wave-toggle", "qdrive-wave-export",
+  "qdrive-current", "qdrive-speed", "qdrive-angle", "qdrive-current-chart", "qdrive-speed-chart",
+  "qdrive-angle-chart", "qdrive-ctrl-mode", "qdrive-ctrl-value", "qdrive-ctrl-unit",
+  "qdrive-ctrl-send", "qdrive-confirm-clear", "qdrive-confirm-k230", "qdrive-confirm-limits",
+  "qdrive-enable", "qdrive-disable", "qdrive-apply-config", "qdrive-timeout-input",
+  "qdrive-timeout-support", "qdrive-zero", "qdrive-calibrate", "qdrive-store", "qdrive-restore",
+  "qdrive-reboot", "qdrive-upgrade", "qdrive-confirm-dialog", "qdrive-confirm-title",
+  "qdrive-confirm-description", "qdrive-confirm-ok", "qdrive-dfu-dialog", "qdrive-dfu-file",
+  "qdrive-dfu-file-name", "qdrive-dfu-device", "qdrive-dfu-device-name", "qdrive-dfu-progress",
+  "qdrive-dfu-status", "qdrive-dfu-start",
 ].map((id) => [id.replaceAll("-", "_"), $(id)]));
 
 let activeSession = null;
@@ -47,6 +78,19 @@ let heartbeatTimer = null;
 let heartbeatBusy = false;
 let toastTimer = null;
 let logLines = [];
+let qdriveSession = null;
+let qdriveConnectionBusy = false;
+let qdriveLastStatus = null;
+let qdriveWaveActive = false;
+let qdriveWaveGeneration = 0;
+let qdriveWaveTimer = null;
+let qdriveWaveStart = 0;
+let qdriveSamples = [];
+let qdriveTerminalText = "";
+let qdriveDfuFile = null;
+let qdriveDfuDevice = null;
+let qdriveDfuBusy = false;
+let qdriveActionBusy = false;
 
 class SerialTransport {
   constructor(port) {
@@ -160,6 +204,164 @@ function setBadge(element, text, state = "") {
   element.textContent = text;
   if (state) element.dataset.state = state;
   else delete element.dataset.state;
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+function appendQDriveTerminal(chunk) {
+  const text = stripAnsi(chunk).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  qdriveTerminalText = `${qdriveTerminalText}${text}`.slice(-40000);
+  elements.qdrive_terminal_output.textContent = qdriveTerminalText || "等待 QDrive 输出";
+  elements.qdrive_terminal_output.scrollTop = elements.qdrive_terminal_output.scrollHeight;
+}
+
+function qdriveValue(value, digits, unit) {
+  return Number.isFinite(value) ? `${value.toFixed(digits)} ${unit}` : `-- ${unit}`;
+}
+
+function renderQDriveStatus(status) {
+  qdriveLastStatus = status;
+  elements.qdrive_drive_state.textContent = status.enabled === true ? "enabled" : status.enabled === false ? "disabled" : "unknown";
+  elements.qdrive_control_mode.textContent = status.mode;
+  elements.qdrive_can_id_value.textContent = status.can_id === null ? "--" : String(status.can_id).padStart(3, "0");
+  elements.qdrive_voltage.textContent = qdriveValue(status.voltage_v, 2, "V");
+  elements.qdrive_current.textContent = qdriveValue(status.current_a, 3, "A");
+  elements.qdrive_speed.textContent = qdriveValue(status.speed_rpm, 2, "rpm");
+  elements.qdrive_angle.textContent = qdriveValue(status.angle_rad, 3, "rad");
+  updateControls();
+}
+
+function drawQDriveChart(canvas, key, color, flatRange) {
+  const bounds = canvas.getBoundingClientRect();
+  if (bounds.width < 1 || bounds.height < 1) return;
+  const ratio = Math.min(2, window.devicePixelRatio || 1);
+  const width = Math.round(bounds.width * ratio);
+  const height = Math.round(bounds.height * ratio);
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+  const context = canvas.getContext("2d");
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  const w = bounds.width;
+  const h = bounds.height;
+  context.fillStyle = "#fafbfb";
+  context.fillRect(0, 0, w, h);
+  const pad = { left: 42, right: 10, top: 10, bottom: 22 };
+  const plotW = Math.max(1, w - pad.left - pad.right);
+  const plotH = Math.max(1, h - pad.top - pad.bottom);
+  const lastTime = qdriveSamples.at(-1)?.time_s ?? 10;
+  const firstTime = Math.max(0, lastTime - 10);
+  const visible = qdriveSamples.filter((sample) => sample.time_s >= firstTime);
+  const values = visible.map((sample) => sample[key]).filter(Number.isFinite);
+  let min = values.length ? Math.min(...values) : -flatRange;
+  let max = values.length ? Math.max(...values) : flatRange;
+  if (min === max) { min -= flatRange; max += flatRange; }
+  const margin = Math.max(flatRange * .1, (max - min) * .12);
+  min -= margin;
+  max += margin;
+  context.font = "9px ui-monospace, monospace";
+  context.textAlign = "right";
+  context.textBaseline = "middle";
+  for (let index = 0; index <= 4; index += 1) {
+    const y = pad.top + plotH * index / 4;
+    const value = max - (max - min) * index / 4;
+    context.strokeStyle = "#e2e6e8";
+    context.lineWidth = 1;
+    context.beginPath(); context.moveTo(pad.left, y); context.lineTo(w - pad.right, y); context.stroke();
+    context.fillStyle = "#7a8288";
+    context.fillText(value.toPrecision(3), pad.left - 6, y);
+  }
+  context.textAlign = "center";
+  context.textBaseline = "alphabetic";
+  for (let index = 0; index <= 4; index += 1) {
+    const x = pad.left + plotW * index / 4;
+    const time = firstTime + 10 * index / 4;
+    context.fillStyle = "#7a8288";
+    context.fillText(`${(time - lastTime).toFixed(1)}s`, x, h - 6);
+  }
+  if (!visible.length) return;
+  context.strokeStyle = color;
+  context.lineWidth = 1.7;
+  context.lineJoin = "round";
+  context.beginPath();
+  visible.forEach((sample, index) => {
+    const x = pad.left + (sample.time_s - firstTime) / 10 * plotW;
+    const y = pad.top + (max - sample[key]) / (max - min) * plotH;
+    if (index === 0) context.moveTo(x, y); else context.lineTo(x, y);
+  });
+  context.stroke();
+}
+
+function renderQDriveCharts() {
+  drawQDriveChart(elements.qdrive_current_chart, "current_a", "#287387", .1);
+  drawQDriveChart(elements.qdrive_speed_chart, "speed_rpm", "#176a49", 10);
+  drawQDriveChart(elements.qdrive_angle_chart, "angle_rad", "#a42e35", .1);
+}
+
+function downloadText(filename, text, type = "text/plain;charset=utf-8") {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function confirmQDriveAction(title, description) {
+  const dialog = elements.qdrive_confirm_dialog;
+  elements.qdrive_confirm_title.textContent = title;
+  elements.qdrive_confirm_description.textContent = description;
+  dialog.returnValue = "";
+  dialog.showModal();
+  return new Promise((resolve) => {
+    dialog.addEventListener("close", () => resolve(dialog.returnValue === "confirm"), { once: true });
+  });
+}
+
+function k230IsArmed() {
+  return latestTelemetry?.state === "ARMED";
+}
+
+function qdriveInterlocksReady() {
+  return elements.qdrive_confirm_clear.checked && elements.qdrive_confirm_k230.checked &&
+    elements.qdrive_confirm_limits.checked && !k230IsArmed() &&
+    elements.qdrive_timeout_support.dataset.state === "supported" &&
+    Number(elements.qdrive_timeout_input.value) > 0;
+}
+
+function updateQDriveControls() {
+  const connected = Boolean(qdriveSession?.isConnected());
+  const busy = qdriveConnectionBusy || qdriveActionBusy || qdriveDfuBusy;
+  const directReady = connected && qdriveInterlocksReady() && !busy;
+  const stopped = qdriveLastStatus?.enabled !== true;
+  elements.qdrive_connect_button.textContent = connected ? "断开 QDrive" : "连接 QDrive Type-C";
+  elements.qdrive_connect_button.disabled = busy || !("serial" in navigator);
+  elements.qdrive_terminal_input.disabled = !connected || qdriveWaveActive || busy;
+  elements.qdrive_terminal_send.disabled = !connected || qdriveWaveActive || busy;
+  elements.qdrive_read_device.disabled = !connected || busy;
+  elements.qdrive_read_status.disabled = !connected || busy;
+  elements.qdrive_read_config.disabled = !connected || busy;
+  elements.qdrive_wave_toggle.disabled = !connected || busy;
+  elements.qdrive_wave_toggle.textContent = qdriveWaveActive ? "停止绘制" : "开始绘制";
+  elements.qdrive_wave_export.disabled = qdriveSamples.length === 0;
+  elements.qdrive_enable.disabled = !directReady || qdriveLastStatus?.enabled === true;
+  elements.qdrive_disable.disabled = !connected || busy;
+  elements.qdrive_ctrl_send.disabled = !directReady || qdriveLastStatus?.enabled !== true;
+  const configAllowed = connected && stopped && !k230IsArmed() && !busy;
+  elements.qdrive_apply_config.disabled = !configAllowed;
+  document.querySelectorAll("[data-qdrive-config-key]").forEach((input) => {
+    input.disabled = !configAllowed || (input.dataset.qdriveConfigKey === "timeout" &&
+      elements.qdrive_timeout_support.dataset.state === "unsupported");
+  });
+  elements.qdrive_zero.disabled = !configAllowed;
+  elements.qdrive_calibrate.disabled = !directReady || !stopped;
+  elements.qdrive_store.disabled = !configAllowed;
+  elements.qdrive_restore.disabled = !configAllowed;
+  elements.qdrive_reboot.disabled = !connected || busy;
+  elements.qdrive_upgrade.disabled = qdriveDfuBusy || qdriveActionBusy;
 }
 
 function numberText(value, digits, suffix) {
@@ -333,6 +535,7 @@ function updateControls() {
   elements.start_episode_button.disabled = !connected || !armed || episodeActive;
   elements.stop_episode_button.disabled = !connected || !armed;
   if (armed) startHeartbeat(); else stopHeartbeat();
+  updateQDriveControls();
 }
 
 function startHeartbeat() {
@@ -475,6 +678,371 @@ async function applyConfig() {
   logEvent("config_applied");
 }
 
+function stopQDriveWave(message = "") {
+  qdriveWaveGeneration += 1;
+  qdriveWaveActive = false;
+  window.clearTimeout(qdriveWaveTimer);
+  qdriveWaveTimer = null;
+  if (message) toast(message);
+  updateQDriveControls();
+}
+
+async function queryQDriveStatus(silent = false) {
+  if (!qdriveSession) throw new ProtocolError("QDrive 未连接");
+  const raw = await qdriveSession.captureUntilIdle(
+    () => qdriveSession.sendLine("status"),
+    24,
+    700,
+    { silent, isComplete: isCompleteQDriveStatus },
+  );
+  const status = parseQDriveStatus(raw);
+  if (!status) throw new ProtocolError("QDrive status 输出无法解析");
+  renderQDriveStatus(status);
+  return status;
+}
+
+async function qdriveWavePoll(generation) {
+  if (!qdriveWaveActive || generation !== qdriveWaveGeneration || !qdriveSession) return;
+  const started = performance.now();
+  try {
+    const status = await queryQDriveStatus(true);
+    const time = (performance.now() - qdriveWaveStart) / 1000;
+    qdriveSamples.push({ time_s: time, ...status });
+    if (qdriveSamples.length > 6000) qdriveSamples.splice(0, qdriveSamples.length - 6000);
+    elements.qdrive_wave_export.disabled = false;
+    window.requestAnimationFrame(renderQDriveCharts);
+  } catch (error) {
+    stopQDriveWave();
+    toast(`QDrive 波形采集停止：${error.message}`, "error");
+    return;
+  }
+  const frequency = Math.min(120, Math.max(30, Number(elements.qdrive_wave_frequency.value) || 30));
+  const remaining = Math.max(0, 1000 / frequency - (performance.now() - started));
+  qdriveWaveTimer = window.setTimeout(() => qdriveWavePoll(generation), remaining);
+}
+
+function startQDriveWave() {
+  if (!qdriveSession) throw new ProtocolError("请先连接 QDrive");
+  qdriveWaveActive = true;
+  qdriveWaveGeneration += 1;
+  const offset = qdriveSamples.at(-1)?.time_s ?? 0;
+  qdriveWaveStart = performance.now() - offset * 1000;
+  updateQDriveControls();
+  qdriveWavePoll(qdriveWaveGeneration);
+}
+
+async function endQDriveSession(requestDisable = true) {
+  const session = qdriveSession;
+  qdriveSession = null;
+  stopQDriveWave();
+  if (session) {
+    if (requestDisable && session.isConnected()) {
+      try { await session.sendLine("disable"); await delay(80); } catch { /* USB removal remains safe */ }
+    }
+    await session.close().catch(() => {});
+  }
+  qdriveLastStatus = null;
+  setBadge(elements.qdrive_connection_badge, "未连接");
+  elements.qdrive_hardware.textContent = "--";
+  elements.qdrive_software.textContent = "--";
+  elements.qdrive_drive_state.textContent = "--";
+  elements.qdrive_control_mode.textContent = "--";
+  elements.qdrive_can_id_value.textContent = "--";
+  elements.qdrive_voltage.textContent = "-- V";
+  updateControls();
+}
+
+async function readQDriveDevice() {
+  if (!qdriveSession) throw new ProtocolError("QDrive 未连接");
+  const version = await qdriveSession.captureUntilIdle(() => qdriveSession.sendLine("version"), 35, 1200);
+  const info = await qdriveSession.captureUntilIdle(() => qdriveSession.sendLine("info"), 35, 1200);
+  const identity = parseQDriveIdentity(version, info);
+  if (!identity) throw new ProtocolError("所选 Type-C 串口不是可识别的 QDrive LetterShell");
+  elements.qdrive_hardware.textContent = identity.hardware;
+  elements.qdrive_software.textContent = identity.software;
+  return identity;
+}
+
+async function connectQDrivePort(port) {
+  qdriveConnectionBusy = true;
+  setBadge(elements.qdrive_connection_badge, "识别中", "busy");
+  updateQDriveControls();
+  const session = new QDriveSerialSession(port, {
+    onChunk: appendQDriveTerminal,
+    onReadError: (error) => logEvent(`qdrive_read_error ${error.message}`),
+    onUnexpectedClose: async () => {
+      if (qdriveSession === session) await endQDriveSession(false);
+      toast("QDrive Type-C 已断开", "error");
+    },
+  });
+  try {
+    const handoff = await requestSerialHandoff();
+    if (!handoff.released) throw new ProtocolError("另一个产品页面正在执行不可中断任务");
+    if (handoff.delayMs > 0) await delay(handoff.delayMs);
+    await session.open(Number(elements.qdrive_baud_rate.value) || 115200);
+    await delay(20);
+    await session.sendRaw(" \x7f");
+    await delay(20);
+    const version = await session.captureUntilIdle(() => session.sendLine("version"), 35, 1200);
+    const info = await session.captureUntilIdle(() => session.sendLine("info"), 35, 1200);
+    const identity = parseQDriveIdentity(version, info);
+    if (!identity) throw new ProtocolError("所选 Type-C 串口不是 QDrive QD4310");
+    qdriveSession = session;
+    elements.qdrive_hardware.textContent = identity.hardware;
+    elements.qdrive_software.textContent = identity.software;
+    setBadge(elements.qdrive_connection_badge, "已连接", "ok");
+    await queryQDriveStatus(false).catch((error) => appendQDriveTerminal(`\n[status] ${error.message}\n`));
+    await readQDriveConfig().catch((error) => appendQDriveTerminal(`\n[config] ${error.message}\n`));
+    toast("QDrive Type-C 已连接");
+  } catch (error) {
+    await session.close().catch(() => {});
+    setBadge(elements.qdrive_connection_badge, "连接失败", "fault");
+    throw error;
+  } finally {
+    qdriveConnectionBusy = false;
+    updateControls();
+  }
+}
+
+async function readQDriveConfig() {
+  if (!qdriveSession) throw new ProtocolError("QDrive 未连接");
+  const raw = await qdriveSession.captureUntilIdle(() => qdriveSession.sendLine("config --list"), 35, 1500);
+  const config = parseQDriveConfig(raw);
+  if (!Object.keys(config).length) throw new ProtocolError("没有从 config --list 解析到参数");
+  document.querySelectorAll("[data-qdrive-config-key]").forEach((input) => {
+    const key = input.dataset.qdriveConfigKey;
+    if (Object.hasOwn(config, key)) input.value = config[key] === null ? "" : String(config[key]);
+  });
+  const timeoutSupported = Object.hasOwn(config, "timeout");
+  elements.qdrive_timeout_support.dataset.state = timeoutSupported ? "supported" : "unsupported";
+  elements.qdrive_timeout_support.textContent = timeoutSupported ? "当前固件支持 timeout；直控要求 > 0 s" : "当前固件未列出 timeout，已禁止直控与写入";
+  if (!timeoutSupported) elements.qdrive_timeout_input.value = "";
+  updateQDriveControls();
+  toast("QDrive 参数已读取");
+  return config;
+}
+
+async function withQDriveAction(action) {
+  if (qdriveActionBusy) throw new ProtocolError("QDrive 正在执行上一项操作");
+  qdriveActionBusy = true;
+  updateQDriveControls();
+  try { return await action(); }
+  finally { qdriveActionBusy = false; updateControls(); }
+}
+
+async function setQDriveConfig() {
+  if (k230IsArmed()) throw new ProtocolError("K230 闭环已武装，禁止修改 QDrive 参数");
+  if (qdriveLastStatus?.enabled === true) throw new ProtocolError("请先失能 QDrive 再修改参数");
+  const commands = [];
+  document.querySelectorAll("[data-qdrive-config-key]").forEach((input) => {
+    if (input.disabled || input.value.trim() === "") return;
+    commands.push(formatConfigCommand(input.dataset.qdriveConfigKey, input.value));
+  });
+  if (!commands.length) throw new ProtocolError("没有可写入的 QDrive 参数");
+  await withQDriveAction(async () => {
+    for (const command of commands) {
+      await qdriveSession.captureUntilIdle(() => qdriveSession.sendLine(command), 35, 1200);
+      await delay(50);
+    }
+  });
+  toast(`${commands.length} 项参数已设置到 QDrive RAM`);
+}
+
+async function enableQDrive() {
+  if (!qdriveInterlocksReady()) throw new ProtocolError("直接控制的三项安全确认尚未完成");
+  const confirmed = await confirmQDriveAction("使能 QDrive？", "Type-C 将直接取得 QD4310 控制权，K230 闭环必须保持失能。");
+  if (!confirmed) return;
+  await withQDriveAction(async () => {
+    const raw = await qdriveSession.captureUntilIdle(() => qdriveSession.sendLine("enable"), 50, 1800);
+    if (/failed|calibrate first/i.test(raw)) throw new ProtocolError("QDrive 使能失败，需先完成校准");
+    await queryQDriveStatus(false);
+  });
+}
+
+async function disableQDrive() {
+  stopQDriveWave();
+  await withQDriveAction(async () => {
+    await qdriveSession.captureUntilIdle(() => qdriveSession.sendLine("disable"), 35, 1200);
+    await queryQDriveStatus(false).catch(() => {});
+  });
+  toast("QDrive 已失能");
+}
+
+async function sendQDriveControl(mode = elements.qdrive_ctrl_mode.value, value = elements.qdrive_ctrl_value.value) {
+  if (!qdriveInterlocksReady()) throw new ProtocolError("直接控制的三项安全确认尚未完成");
+  if (qdriveLastStatus?.enabled !== true) throw new ProtocolError("请先使能 QDrive");
+  const command = formatControlCommand(mode, value);
+  await withQDriveAction(() => qdriveSession.captureUntilIdle(() => qdriveSession.sendLine(command), 35, 1200));
+}
+
+async function promptedQDriveCommand(command, options = {}) {
+  const first = await qdriveSession.captureUntilIdle(
+    () => qdriveSession.sendLine(command),
+    options.initialIdleMs ?? 100,
+    options.initialTimeoutMs ?? 2500,
+  );
+  if (!/(?:\(y\/n\)|re-calibrate\?)/i.test(first)) return first;
+  return `${first}${await qdriveSession.captureUntilIdle(
+    () => qdriveSession.sendLine("y"),
+    options.confirmIdleMs ?? 250,
+    options.confirmTimeoutMs ?? 8000,
+    { isComplete: options.isComplete },
+  )}`;
+}
+
+async function zeroQDrive() {
+  const confirmed = await confirmQDriveAction("设置 QDrive 零点？", "当前位置将作为新的机械零位；QDrive 必须保持失能。");
+  if (!confirmed) return;
+  await withQDriveAction(() => qdriveSession.captureUntilIdle(() => qdriveSession.sendLine("config zero_pos"), 50, 1500));
+  toast("QDrive 零点命令已执行");
+}
+
+async function calibrateQDrive() {
+  if (!qdriveInterlocksReady()) throw new ProtocolError("校准前必须完成三项安全确认");
+  const confirmed = await confirmQDriveAction("开始 QDrive 校准？", "校准会驱动电机运动。机构必须架空，且 K230 闭环保持失能。");
+  if (!confirmed) return;
+  await withQDriveAction(async () => {
+    const first = await promptedQDriveCommand("calibrate", {
+      confirmIdleMs: 30000,
+      confirmTimeoutMs: 45000,
+      isComplete: (raw) => /calibration (?:completed|failed)/i.test(stripAnsi(raw)),
+    });
+    if (/calibration started/i.test(first) && !/calibration (?:completed|failed)/i.test(first)) {
+      await qdriveSession.captureUntilIdle(
+        () => Promise.resolve(),
+        30000,
+        45000,
+        { isComplete: (raw) => /calibration (?:completed|failed)/i.test(stripAnsi(raw)) },
+      );
+    }
+    await queryQDriveStatus(false).catch(() => {});
+  });
+}
+
+async function storeQDrive() {
+  const confirmed = await confirmQDriveAction("存储 QDrive 参数？", "当前 RAM 参数将写入设备 Flash；QDrive 必须保持失能。");
+  if (!confirmed) return;
+  await withQDriveAction(() => promptedQDriveCommand("store"));
+  toast("QDrive 存储流程已完成");
+}
+
+async function restoreQDrive() {
+  const confirmed = await confirmQDriveAction("恢复 QDrive 默认值？", "该操作会覆盖当前 PID、限制、ID、timeout 与波特率配置。");
+  if (!confirmed) return;
+  await withQDriveAction(async () => {
+    await promptedQDriveCommand("restore", { confirmIdleMs: 1200, confirmTimeoutMs: 5000 });
+    await delay(1500);
+    await readQDriveConfig().catch(() => {});
+  });
+}
+
+async function rebootQDrive() {
+  const confirmed = await confirmQDriveAction("重启 QDrive？", "Type-C 串口会断开，电机输出将停止。");
+  if (!confirmed) return;
+  await qdriveSession.sendLine("reboot");
+  await delay(200);
+  await endQDriveSession(false);
+}
+
+function openQDriveDfuDialog() {
+  if (!navigator.usb) elements.qdrive_dfu_status.textContent = "当前浏览器不支持 WebUSB，请使用桌面版 Chrome 或 Edge";
+  if (!elements.qdrive_dfu_dialog.open) elements.qdrive_dfu_dialog.showModal();
+}
+
+async function upgradeQDrive() {
+  if (!qdriveSession) { openQDriveDfuDialog(); return; }
+  const confirmed = await confirmQDriveAction("进入 QDrive 升级模式？", "设备会释放 Type-C 串口并重新枚举为 STM32 DFU。");
+  if (!confirmed) return;
+  await withQDriveAction(async () => {
+    const raw = await qdriveSession.captureUntilIdle(() => qdriveSession.sendLine("upgrade"), 120, 2500);
+    if (!/\(y\/n\)/i.test(raw) || /unknown|not\s+found/i.test(raw)) {
+      toast("当前固件不支持串口进入 DFU，已打开手动升级窗口", "error");
+      openQDriveDfuDialog();
+      return;
+    }
+    await qdriveSession.sendLine("y");
+    await delay(250);
+    await endQDriveSession(false);
+    openQDriveDfuDialog();
+  });
+}
+
+function updateQDriveControlMode() {
+  const spec = QDRIVE_CONTROL_SPECS[elements.qdrive_ctrl_mode.value];
+  elements.qdrive_ctrl_unit.textContent = spec.unit;
+  elements.qdrive_ctrl_value.min = String(spec.min);
+  elements.qdrive_ctrl_value.max = String(spec.max);
+}
+
+async function dispatchQDriveTerminal(line) {
+  if (!qdriveSession) throw new ProtocolError("QDrive 未连接");
+  const command = line.trim();
+  if (!command) return;
+  if (/^status\b/i.test(command)) { await queryQDriveStatus(false); return; }
+  if (/^config\s+--list\b/i.test(command)) { await readQDriveConfig(); return; }
+  if (/^enable\b/i.test(command)) { await enableQDrive(); return; }
+  if (/^disable\b/i.test(command)) { await disableQDrive(); return; }
+  const ctrl = /^ctrl\s+(current|speed|low_speed|angle|step_angle)(?:\s+|=)([-+\deE.]+)\s*$/i.exec(command);
+  if (ctrl) { await sendQDriveControl(ctrl[1].toLowerCase(), ctrl[2]); return; }
+  if (/^config\s+zero_pos\b/i.test(command)) { await zeroQDrive(); return; }
+  const config = /^config\s+([\w.]+)(?:\s+|=)([-+\deE.]+)\s*$/i.exec(command);
+  if (config) {
+    if (k230IsArmed() || qdriveLastStatus?.enabled === true) throw new ProtocolError("请先失能 K230 闭环和 QDrive");
+    const normalized = formatConfigCommand(config[1], config[2]);
+    await withQDriveAction(() => qdriveSession.captureUntilIdle(() => qdriveSession.sendLine(normalized), 35, 1200));
+    return;
+  }
+  if (/^calibrate\b/i.test(command)) { await calibrateQDrive(); return; }
+  if (/^store\b/i.test(command)) { await storeQDrive(); return; }
+  if (/^restore\b/i.test(command)) { await restoreQDrive(); return; }
+  if (/^reboot\b/i.test(command)) { await rebootQDrive(); return; }
+  if (/^upgrade\b/i.test(command)) { await upgradeQDrive(); return; }
+  if (/^ctrl\b/i.test(command)) throw new ProtocolError("ctrl 命令格式或范围无效");
+  if (/^silent\b/i.test(command)) {
+    const confirmed = await confirmQDriveAction("关闭 QDrive Shell 输出？", "执行 silent 后，只有重启设备才能恢复终端与网页解析输出。");
+    if (!confirmed) return;
+  }
+  await qdriveSession.captureUntilIdle(() => qdriveSession.sendLine(command), 50, 1500);
+}
+
+async function selectQDriveDfuFile() {
+  const file = elements.qdrive_dfu_file.files?.[0];
+  if (!file) return;
+  const parsed = parseDfuSeFile(await file.arrayBuffer());
+  qdriveDfuFile = { file, parsed };
+  elements.qdrive_dfu_file_name.textContent = `${file.name} · ${file.size} bytes`;
+  elements.qdrive_dfu_status.textContent = "DFU 文件已校验";
+  elements.qdrive_dfu_start.disabled = !qdriveDfuDevice;
+}
+
+async function selectQDriveDfuDevice() {
+  qdriveDfuDevice = await chooseQDriveDfuDevice();
+  const { device, descriptors } = qdriveDfuDevice;
+  elements.qdrive_dfu_device_name.textContent = `${device.productName || "STM32 DFU"} · ${descriptors.length} interface`;
+  elements.qdrive_dfu_status.textContent = "DFU 设备已选择";
+  elements.qdrive_dfu_start.disabled = !qdriveDfuFile;
+}
+
+async function startQDriveDfu() {
+  if (!qdriveDfuFile || !qdriveDfuDevice) throw new ProtocolError("请先选择 .dfu 文件和 DFU 设备");
+  qdriveDfuBusy = true;
+  elements.qdrive_dfu_start.disabled = true;
+  elements.qdrive_dfu_progress.value = 0;
+  updateQDriveControls();
+  try {
+    await flashQDriveDfu(qdriveDfuDevice, qdriveDfuFile.parsed, (progress, status) => {
+      elements.qdrive_dfu_progress.value = progress;
+      elements.qdrive_dfu_status.textContent = `${status} · ${(progress * 100).toFixed(0)}%`;
+    });
+    elements.qdrive_dfu_status.textContent = "写入完成，等待设备重新枚举";
+    qdriveDfuDevice = null;
+  } finally {
+    qdriveDfuBusy = false;
+    elements.qdrive_dfu_start.disabled = !(qdriveDfuFile && qdriveDfuDevice);
+    updateQDriveControls();
+  }
+}
+
 function bindEvents() {
   document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => {
     document.querySelectorAll(".tab").forEach((item) => {
@@ -485,6 +1053,7 @@ function bindEvents() {
     document.querySelectorAll(".view").forEach((panel) => panel.classList.toggle(
       "is-active", panel.dataset.panel === tab.dataset.view));
     window.requestAnimationFrame(renderChart);
+    window.requestAnimationFrame(renderQDriveCharts);
   }));
 
   elements.connect_button.addEventListener("click", async () => {
@@ -584,8 +1153,83 @@ function bindEvents() {
     logLines = [];
     elements.event_log.textContent = "等待事件";
   });
-  window.addEventListener("resize", renderChart);
-  window.addEventListener("beforeunload", stopHeartbeat);
+  elements.qdrive_connect_button.addEventListener("click", async () => {
+    try {
+      if (qdriveSession) { await endQDriveSession(true); return; }
+      await connectQDrivePort(await navigator.serial.requestPort());
+    } catch (error) {
+      if (error.name !== "NotFoundError") toast(serialConnectionMessage(error), "error");
+    }
+  });
+  elements.qdrive_terminal_clear.addEventListener("click", () => {
+    qdriveTerminalText = "";
+    elements.qdrive_terminal_output.textContent = "等待 QDrive 输出";
+  });
+  elements.qdrive_terminal_form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const line = elements.qdrive_terminal_input.value;
+    elements.qdrive_terminal_input.value = "";
+    try { await dispatchQDriveTerminal(line); }
+    catch (error) { toast(error.message, "error"); }
+    elements.qdrive_terminal_input.focus();
+  });
+  elements.qdrive_read_device.addEventListener("click", () => withQDriveAction(readQDriveDevice)
+    .then(() => toast("QDrive 设备信息已读取")).catch((error) => toast(error.message, "error")));
+  elements.qdrive_read_status.addEventListener("click", () => withQDriveAction(() => queryQDriveStatus(false))
+    .catch((error) => toast(error.message, "error")));
+  elements.qdrive_read_config.addEventListener("click", () => withQDriveAction(readQDriveConfig)
+    .catch((error) => toast(error.message, "error")));
+  elements.qdrive_wave_toggle.addEventListener("click", () => {
+    try { if (qdriveWaveActive) stopQDriveWave("QDrive 波形采集已停止"); else startQDriveWave(); }
+    catch (error) { toast(error.message, "error"); }
+  });
+  elements.qdrive_wave_export.addEventListener("click", () => {
+    if (!qdriveSamples.length) return;
+    downloadText(`qdrive-waveform-${new Date().toISOString().replaceAll(":", "-")}.csv`,
+      qdriveSamplesCsv(qdriveSamples), "text/csv;charset=utf-8");
+  });
+  elements.qdrive_ctrl_mode.addEventListener("change", updateQDriveControlMode);
+  elements.qdrive_ctrl_send.addEventListener("click", () => sendQDriveControl().catch((error) => toast(error.message, "error")));
+  elements.qdrive_enable.addEventListener("click", () => enableQDrive().catch((error) => toast(error.message, "error")));
+  elements.qdrive_disable.addEventListener("click", () => disableQDrive().catch((error) => toast(error.message, "error")));
+  [elements.qdrive_confirm_clear, elements.qdrive_confirm_k230, elements.qdrive_confirm_limits]
+    .forEach((input) => input.addEventListener("change", updateQDriveControls));
+  elements.qdrive_timeout_input.addEventListener("input", updateQDriveControls);
+  elements.qdrive_apply_config.addEventListener("click", () => setQDriveConfig().catch((error) => toast(error.message, "error")));
+  elements.qdrive_zero.addEventListener("click", () => zeroQDrive().catch((error) => toast(error.message, "error")));
+  elements.qdrive_calibrate.addEventListener("click", () => calibrateQDrive().catch((error) => toast(error.message, "error")));
+  elements.qdrive_store.addEventListener("click", () => storeQDrive().catch((error) => toast(error.message, "error")));
+  elements.qdrive_restore.addEventListener("click", () => restoreQDrive().catch((error) => toast(error.message, "error")));
+  elements.qdrive_reboot.addEventListener("click", () => rebootQDrive().catch((error) => toast(error.message, "error")));
+  elements.qdrive_upgrade.addEventListener("click", () => upgradeQDrive().catch((error) => toast(error.message, "error")));
+  elements.qdrive_dfu_file.addEventListener("change", () => selectQDriveDfuFile().catch((error) => {
+    qdriveDfuFile = null;
+    elements.qdrive_dfu_file_name.textContent = "文件无效";
+    elements.qdrive_dfu_status.textContent = error.message;
+    elements.qdrive_dfu_start.disabled = true;
+  }));
+  elements.qdrive_dfu_device.addEventListener("click", (event) => {
+    event.preventDefault();
+    selectQDriveDfuDevice().catch((error) => {
+      qdriveDfuDevice = null;
+      elements.qdrive_dfu_device_name.textContent = "设备选择失败";
+      elements.qdrive_dfu_status.textContent = error.message;
+      elements.qdrive_dfu_start.disabled = true;
+    });
+  });
+  elements.qdrive_dfu_start.addEventListener("click", (event) => {
+    event.preventDefault();
+    startQDriveDfu().catch((error) => {
+      elements.qdrive_dfu_status.textContent = `升级失败：${error.message}`;
+      toast(error.message, "error");
+    });
+  });
+  window.addEventListener("resize", () => { renderChart(); renderQDriveCharts(); });
+  window.addEventListener("pagehide", () => {
+    stopHeartbeat();
+    stopQDriveWave();
+    qdriveSession?.sendLine("disable").catch(() => {});
+  });
 }
 
 function initialize() {
@@ -595,11 +1239,13 @@ function initialize() {
   populatePolicy(currentPolicy);
   bindEvents();
   renderReport();
+  updateQDriveControlMode();
   updateControls();
-  window.requestAnimationFrame(renderChart);
+  window.requestAnimationFrame(() => { renderChart(); renderQDriveCharts(); });
   registerSerialReleaseHandler(async () => {
-    if (connectionBusy) return false;
+    if (connectionBusy || qdriveConnectionBusy || qdriveActionBusy || qdriveDfuBusy) return false;
     if (activeSession) await endSession(true);
+    if (qdriveSession) await endQDriveSession(true);
     return true;
   });
 }

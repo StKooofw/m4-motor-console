@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#ffffff">
     <title>车载平衡滚球闭环</title>
     <link rel="icon" href="data:,">
-    <link rel="stylesheet" href="./ballbeam.css?v=20260730-2">
+    <link rel="stylesheet" href="./ballbeam.css?v=20260731-1">
   </head>
   <body>
     <header class="app-header">
@@ -34,7 +34,7 @@
         <div class="workspace-title">
           <span class="kicker">H TASK · CLOSED LOOP</span>
           <h1>车载平衡滚球</h1>
-          <span class="workspace-interface">K230 UART1 · 115200 · QD4310 UART2</span>
+          <span class="workspace-interface">K230 UART1 · QD4310 UART2 · QDrive Type-C USB CDC</span>
         </div>
         <dl class="identity-strip">
           <div><dt>控制器</dt><dd id="device-name">等待连接</dd></div>
@@ -51,6 +51,7 @@
           <button class="tab" type="button" data-view="vision" role="tab" aria-selected="false"><span>02</span>视觉与控制</button>
           <button class="tab" type="button" data-view="safety" role="tab" aria-selected="false"><span>03</span>安全限制</button>
           <button class="tab" type="button" data-view="experiment" role="tab" aria-selected="false"><span>04</span>RL 实验</button>
+          <button class="tab" type="button" data-view="qdrive" role="tab" aria-selected="false"><span>05</span>QDrive 调参</button>
         </nav>
 
         <div class="workspace-content">
@@ -245,11 +246,161 @@
               <pre id="event-log">等待连接</pre>
             </section>
           </section>
+
+          <section class="view" data-panel="qdrive">
+            <header class="section-heading qdrive-heading">
+              <div><span class="kicker">TYPE-C / LETTERSHELL</span><h2>QD4310 调参与诊断</h2></div>
+              <div class="qdrive-connect-row">
+                <label><span>串口波特率</span><select id="qdrive-baud-rate">
+                  <option value="115200">115200</option><option value="230400">230400</option>
+                  <option value="460800">460800</option><option value="921600">921600</option>
+                  <option value="1000000">1000000</option><option value="2000000">2000000</option>
+                  <option value="4000000">4000000</option>
+                </select></label>
+                <span class="badge" id="qdrive-connection-badge">未连接</span>
+                <button class="button primary" id="qdrive-connect-button" type="button">连接 QDrive Type-C</button>
+              </div>
+            </header>
+
+            <div class="qdrive-console-layout">
+              <section class="panel qdrive-terminal-panel">
+                <header class="panel-header">
+                  <div><span class="panel-kicker">USB CDC TERMINAL</span><h2>LetterShell 终端</h2></div>
+                  <button class="icon-button" id="qdrive-terminal-clear" type="button" aria-label="清空 QDrive 终端" title="清空终端">×</button>
+                </header>
+                <pre id="qdrive-terminal-output" tabindex="0">等待 QDrive Type-C 连接</pre>
+                <form class="qdrive-terminal-form" id="qdrive-terminal-form">
+                  <label><span>命令</span><input id="qdrive-terminal-input" type="text" autocomplete="off" spellcheck="false" placeholder="status"></label>
+                  <button class="button primary" id="qdrive-terminal-send" type="submit" disabled>发送</button>
+                </form>
+              </section>
+
+              <aside class="panel qdrive-device-panel">
+                <header class="panel-header">
+                  <div><span class="panel-kicker">DEVICE / MOTOR</span><h2>设备状态</h2></div>
+                  <button class="button secondary compact" id="qdrive-read-device" type="button" disabled>读取设备</button>
+                </header>
+                <dl class="value-list">
+                  <div><dt>硬件</dt><dd id="qdrive-hardware">--</dd></div>
+                  <div><dt>固件</dt><dd id="qdrive-software">--</dd></div>
+                  <div><dt>驱动状态</dt><dd id="qdrive-drive-state">--</dd></div>
+                  <div><dt>控制模式</dt><dd id="qdrive-control-mode">--</dd></div>
+                  <div><dt>CAN ID</dt><dd id="qdrive-can-id-value">--</dd></div>
+                  <div><dt>母线电压</dt><dd id="qdrive-voltage">-- V</dd></div>
+                </dl>
+                <div class="qdrive-status-actions">
+                  <button class="button secondary" id="qdrive-read-status" type="button" disabled>刷新状态</button>
+                  <button class="button secondary" id="qdrive-read-config" type="button" disabled>读取参数</button>
+                </div>
+              </aside>
+            </div>
+
+            <section class="panel qdrive-waveform-panel">
+              <header class="panel-header">
+                <div><span class="panel-kicker">STATUS POLLING</span><h2>电流 / 速度 / 角度波形</h2></div>
+                <div class="qdrive-wave-controls">
+                  <label><span>采样率</span><select id="qdrive-wave-frequency"><option>30</option><option>60</option><option>90</option><option>120</option></select><em>Hz</em></label>
+                  <button class="button primary" id="qdrive-wave-toggle" type="button" disabled>开始绘制</button>
+                  <button class="button secondary" id="qdrive-wave-export" type="button" disabled>导出 CSV</button>
+                </div>
+              </header>
+              <div class="qdrive-wave-grid">
+                <article><header><span>电流</span><strong id="qdrive-current">-- A</strong></header><canvas id="qdrive-current-chart" width="960" height="180" aria-label="QDrive 电流波形"></canvas></article>
+                <article><header><span>速度</span><strong id="qdrive-speed">-- rpm</strong></header><canvas id="qdrive-speed-chart" width="960" height="180" aria-label="QDrive 速度波形"></canvas></article>
+                <article><header><span>角度</span><strong id="qdrive-angle">-- rad</strong></header><canvas id="qdrive-angle-chart" width="960" height="180" aria-label="QDrive 角度波形"></canvas></article>
+              </div>
+            </section>
+
+            <div class="qdrive-control-layout">
+              <section class="panel qdrive-direct-panel">
+                <header class="panel-header"><div><span class="panel-kicker">DIRECT CONTROL</span><h2>直接控制</h2></div></header>
+                <div class="qdrive-direct-body">
+                  <div class="qdrive-direct-form">
+                    <label><span>模式</span><select id="qdrive-ctrl-mode">
+                      <option value="current">电流</option><option value="speed">速度</option>
+                      <option value="low_speed">低速</option><option value="angle">绝对角度</option>
+                      <option value="step_angle">步进角度</option>
+                    </select></label>
+                    <label><span>控制量</span><input id="qdrive-ctrl-value" type="number" step="0.001" value="0"><em id="qdrive-ctrl-unit">A</em></label>
+                    <button class="button primary" id="qdrive-ctrl-send" type="button" disabled>发送控制量</button>
+                  </div>
+                  <div class="confirmations qdrive-confirmations">
+                    <label><input id="qdrive-confirm-clear" type="checkbox"><span>机构架空且行程内无人手</span></label>
+                    <label><input id="qdrive-confirm-k230" type="checkbox"><span>K230 闭环已失能</span></label>
+                    <label><input id="qdrive-confirm-limits" type="checkbox"><span>电流与速度限制已核对</span></label>
+                  </div>
+                  <div class="button-row">
+                    <button class="button primary green" id="qdrive-enable" type="button" disabled>使能 QDrive</button>
+                    <button class="button danger" id="qdrive-disable" type="button" disabled>立即失能</button>
+                  </div>
+                </div>
+              </section>
+
+              <section class="panel qdrive-parameter-panel">
+                <header class="panel-header">
+                  <div><span class="panel-kicker">RUNTIME CONFIG</span><h2>PID 与限制参数</h2></div>
+                  <button class="button primary compact" id="qdrive-apply-config" type="button" disabled>设置到 RAM</button>
+                </header>
+                <div class="qdrive-parameter-body">
+                  <fieldset><legend>速度环 PID</legend><div class="input-grid three">
+                    <label><span>Kp</span><input data-qdrive-config-key="pid.speed.kp" type="number" step="0.000001"></label>
+                    <label><span>Ki</span><input data-qdrive-config-key="pid.speed.ki" type="number" step="0.000001"></label>
+                    <label><span>Kd</span><input data-qdrive-config-key="pid.speed.kd" type="number" step="0.000001"></label>
+                  </div></fieldset>
+                  <fieldset><legend>角度环 PID</legend><div class="input-grid three">
+                    <label><span>Kp</span><input data-qdrive-config-key="pid.angle.kp" type="number" step="0.000001"></label>
+                    <label><span>Ki</span><input data-qdrive-config-key="pid.angle.ki" type="number" step="0.000001"></label>
+                    <label><span>Kd</span><input data-qdrive-config-key="pid.angle.kd" type="number" step="0.000001"></label>
+                  </div></fieldset>
+                  <fieldset><legend>限制与通信</legend><div class="input-grid three">
+                    <label><span>最大电流</span><input data-qdrive-config-key="limit.current" type="number" min="0" max="1.65" step="0.001"><em>A</em></label>
+                    <label><span>最大速度</span><input data-qdrive-config-key="limit.speed" type="number" min="0" max="1000" step="0.1"><em>rpm</em></label>
+                    <label><span>CAN ID</span><input data-qdrive-config-key="can.id" type="number" min="0" max="7" step="1"></label>
+                    <label><span>通信超时</span><input data-qdrive-config-key="timeout" id="qdrive-timeout-input" type="number" min="0" step="0.01"><em>s</em></label>
+                    <label><span>UART 波特率</span><input data-qdrive-config-key="uart.baud_rate" type="number" min="10000" max="10000000" step="1"><em>bps</em></label>
+                    <span class="config-support" id="qdrive-timeout-support">读取参数后识别支持状态</span>
+                  </div></fieldset>
+                </div>
+              </section>
+            </div>
+
+            <section class="qdrive-maintenance-band">
+              <div><span>零点</span><button class="button secondary" id="qdrive-zero" type="button" disabled>设置当前位置</button></div>
+              <div><span>校准</span><button class="button secondary" id="qdrive-calibrate" type="button" disabled>开始校准</button></div>
+              <div><span>持久化</span><button class="button secondary" id="qdrive-store" type="button" disabled>存储参数</button></div>
+              <div><span>默认值</span><button class="button secondary" id="qdrive-restore" type="button" disabled>恢复默认</button></div>
+              <div><span>设备</span><button class="button secondary" id="qdrive-reboot" type="button" disabled>重启</button></div>
+              <div><span>WebUSB</span><button class="button primary" id="qdrive-upgrade" type="button">固件升级</button></div>
+            </section>
+          </section>
         </div>
       </div>
     </main>
 
+    <dialog class="qdrive-dialog" id="qdrive-confirm-dialog">
+      <form method="dialog">
+        <header><span class="panel-kicker">CONFIRM ACTION</span><h2 id="qdrive-confirm-title">确认操作</h2></header>
+        <p id="qdrive-confirm-description"></p>
+        <div class="button-row"><button class="button secondary" value="cancel">取消</button><button class="button danger" id="qdrive-confirm-ok" value="confirm">确认</button></div>
+      </form>
+    </dialog>
+
+    <dialog class="qdrive-dialog qdrive-dfu-dialog" id="qdrive-dfu-dialog">
+      <form method="dialog">
+        <header><span class="panel-kicker">STM32 DFUSE / WEBUSB</span><h2>QD4310 固件升级</h2></header>
+        <div class="qdrive-dfu-steps">
+          <label class="file-button"><input id="qdrive-dfu-file" type="file" accept=".dfu"><span>选择 .dfu 文件</span></label>
+          <strong id="qdrive-dfu-file-name">未选择文件</strong>
+          <button class="button secondary" id="qdrive-dfu-device" type="button">选择 DFU 设备</button>
+          <strong id="qdrive-dfu-device-name">未选择设备</strong>
+        </div>
+        <progress id="qdrive-dfu-progress" max="1" value="0"></progress>
+        <p id="qdrive-dfu-status">等待本地文件与 WebUSB DFU 设备</p>
+        <div class="button-row"><button class="button secondary" value="cancel">关闭</button><button class="button danger" id="qdrive-dfu-start" type="button" disabled>开始写入</button></div>
+      </form>
+    </dialog>
+
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-    <script type="module" src="./ballbeam_app.mjs?v=20260730-2"></script>
+    <script type="module" src="./ballbeam_app.mjs?v=20260731-1"></script>
   </body>
 </html>
